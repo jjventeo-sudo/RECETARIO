@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 
 /* =========================================================================
    1. Utilidades
@@ -1360,7 +1360,7 @@ async function SettingsView(app) {
       <h2 class="serif">Importar copia</h2>
       <p>Se combinan las recetas: añade las nuevas y, si una receta existe en los dos sitios, se queda la versión editada más recientemente. Las recetas que borraste también se borran aquí.</p>
       <div class="actions">
-        <label class="btn">${icon('upload', 'ic-sm')}Importar copia<input type="file" accept=".zip,application/zip" hidden data-act="import"></label>
+        <label class="btn">${icon('upload', 'ic-sm')}Importar copia<input type="file" hidden data-act="import"></label>
       </div>
     </section>
 
