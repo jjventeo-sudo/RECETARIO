@@ -550,3 +550,12 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
 }
 
 .cook-cover { width: min(56vw, 220px); justify-self: center; opacity: .9; }
+
+/* Botón de sincronización */
+.sync-btn { position: relative; color: var(--text-2); }
+.sync-btn.has-dot::after {
+  content: ""; position: absolute; top: 11px; right: 11px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg);
+}
+.sync-btn.is-spinning .ic { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

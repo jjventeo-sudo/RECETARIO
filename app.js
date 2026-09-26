@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.0.1';
+const APP_VERSION = '1.1.0';
 
 /* =========================================================================
    1. Utilidades
@@ -300,11 +300,12 @@ const Store = {
     await Meta.set('lastChange', Date.now());
     requestPersistence();
     Images.collectGarbage().catch(() => {});
+    Sync.schedule();
     return recipe;
   },
 
   /** Marcas que no cambian el contenido (favorito, cocinada): no cuentan como edición. */
-  async touch(recipe) { await DB.put('recipes', recipe); return recipe; },
+  async touch(recipe) { recipe.updatedAt = Date.now(); await DB.put('recipes', recipe); Sync.schedule(); return recipe; },
 
   async remove(id) {
     await DB.tx(['recipes', 'tombstones'], 'readwrite', (t) => {
@@ -313,6 +314,7 @@ const Store = {
     });
     await Meta.set('lastChange', Date.now());
     Images.collectGarbage().catch(() => {});
+    Sync.schedule();
   },
 
   newVersion(name = 'Original') {
@@ -531,7 +533,10 @@ async function HomeView(app) {
     <header class="home-head">
       <div class="topbar">
         <p class="home-date">${esc(today)}</p>
-        <button class="icon-btn" data-go="#/ajustes" aria-label="Ajustes y copias">${icon('settings-2')}</button>
+        <div style="display:flex;gap:4px">
+          <span id="sync-slot">${Sync.state !== 'off' ? syncButtonHTML(Sync.state) : ''}</span>
+          <button class="icon-btn" data-go="#/ajustes" aria-label="Ajustes y sincronización">${icon('settings-2')}</button>
+        </div>
       </div>
       <h1 class="home-title serif">Recetario</h1>
     </header>
@@ -570,6 +575,7 @@ async function HomeView(app) {
       paint();
       return;
     }
+    if (e.target.closest('[data-act="sync"]')) { Sync.sync({ interactive: true }).catch(() => {}); return; }
     const act = e.target.closest('[data-banner]');
     if (act) {
       if (act.dataset.banner === 'backup') Router.go('#/ajustes');
@@ -580,7 +586,8 @@ async function HomeView(app) {
   const q = $('#q', app);
   q?.addEventListener('input', () => { UI.homeQuery = q.value; paint(); });
 
-  return { destroy: () => app.removeEventListener('click', onClick) };
+  const offSync = Sync.on((st) => { const slot = $('#sync-slot', app); if (slot) slot.innerHTML = st !== 'off' ? syncButtonHTML(st) : ''; });
+  return { destroy: () => { app.removeEventListener('click', onClick); offSync(); } };
 }
 
 function emptyHome() {
@@ -653,7 +660,7 @@ function homeResults(recipes) {
 }
 
 async function backupReminder(count) {
-  if (!count) return '';
+  if (!count || (await Meta.get('driveConnected'))) return ''; // con Drive, la copia ya está en la nube
   const [lastExport, lastChange, snooze] = await Promise.all([Meta.get('lastExport'), Meta.get('lastChange'), Meta.get('reminderSnoozeUntil', 0)]);
   if (!lastChange || Date.now() < snooze) return '';
   if (lastExport && lastExport >= lastChange) return '';
@@ -1329,10 +1336,22 @@ async function CookView(app, id, params) {
 
 /* ---------- 7.5 Ajustes y copias ---------- */
 
+function syncStatusText(lastSync) {
+  const st = Sync.state;
+  if (st === 'syncing') return 'Sincronizando…';
+  if (st === 'needs-tap') return 'Hay cambios pendientes o el permiso de Google ha caducado. Pulsa “Sincronizar ahora”.';
+  if (st === 'offline') return 'Sin conexión. Se sincronizará cuando vuelva internet.';
+  if (st === 'error') return Sync.lastError;
+  if (!lastSync) return 'Aún no se ha sincronizado.';
+  const min = Math.round((Date.now() - lastSync) / 60000);
+  return `Última sincronización: ${min < 1 ? 'hace un momento' : min < 60 ? `hace ${min} min` : formatDate(lastSync)}.`;
+}
+
 async function SettingsView(app) {
-  const [recipes, lastExport, est, persisted] = await Promise.all([
+  const [recipes, lastExport, est, persisted, driveOn, lastSync] = await Promise.all([
     Store.list(), Meta.get('lastExport'),
     navigator.storage?.estimate?.().catch(() => null), navigator.storage?.persisted?.().catch(() => null),
+    Meta.get('driveConnected'), Meta.get('lastSync'),
   ]);
   const used = est?.usage || 0, quota = est?.quota || 0;
   const pct = quota ? Math.max(1, Math.round((used / quota) * 100)) : 0;
@@ -1347,12 +1366,26 @@ async function SettingsView(app) {
     <h1 class="serif">Ajustes</h1>
 
     <section class="panel">
-      <h2 class="serif">Copia y traspaso</h2>
+      <h2 class="serif">Sincronización con Google Drive</h2>
+      ${driveOn ? `
+        <p>Conectado. Las recetas y fotos se sincronizan solas entre tus dispositivos a través de una carpeta privada de tu Drive que solo ve esta app.</p>
+        <p class="hint" id="sync-status">${syncStatusText(lastSync)}</p>
+        <div class="actions">
+          <button class="btn btn-primary" data-act="sync-now">${icon('refresh-cw', 'ic-sm')}Sincronizar ahora</button>
+          <button class="btn btn-ghost" data-act="disconnect">Desconectar</button>
+        </div>` : `
+        <p>Conecta tu cuenta de Google para que las recetas pasen solas entre el móvil y la tablet. Se guardan en una carpeta privada de tu Drive que solo ve esta app; tus otros archivos no se tocan.</p>
+        <p class="hint">Usa la misma cuenta de Google en todos tus dispositivos.</p>
+        <div class="actions"><button class="btn btn-primary" data-act="connect">${icon('cloud', 'ic-sm')}Conectar con Google Drive</button></div>`}
+    </section>
+
+    <section class="panel">
+      <h2 class="serif">Copia en archivo</h2>
       <p>Guarda todo el recetario (${recipes.length} ${recipes.length === 1 ? 'receta' : 'recetas'}, con sus fotos) en un único archivo. Pásalo al otro dispositivo por Quick Share o WhatsApp y ábrelo allí con “Importar copia”.</p>
       <p class="hint">${lastExport ? `Última copia: ${formatDate(lastExport)}` : 'Aún no has hecho ninguna copia.'}</p>
       <div class="actions">
-        ${canShare ? `<button class="btn btn-primary" data-act="share">${icon('share-2', 'ic-sm')}Compartir copia</button>` : ''}
-        <button class="btn ${canShare ? '' : 'btn-primary'}" data-act="download">${icon('download', 'ic-sm')}Guardar archivo</button>
+        ${canShare ? `<button class="btn ${driveOn ? '' : 'btn-primary'}" data-act="share">${icon('share-2', 'ic-sm')}Compartir copia</button>` : ''}
+        <button class="btn ${canShare || driveOn ? '' : 'btn-primary'}" data-act="download">${icon('download', 'ic-sm')}Guardar archivo</button>
       </div>
     </section>
 
@@ -1372,7 +1405,7 @@ async function SettingsView(app) {
 
     <section class="panel">
       <h2 class="serif">Acerca de</h2>
-      <p>Recetario ${APP_VERSION}. Funciona sin conexión y todo se guarda solo en este dispositivo.</p>
+      <p>Recetario ${APP_VERSION}. Funciona sin conexión. ${driveOn ? 'Tus recetas se guardan en este dispositivo y se sincronizan con tu Google Drive.' : 'Todo se guarda solo en este dispositivo.'}</p>
     </section>
   </div></div>`;
 
@@ -1380,6 +1413,20 @@ async function SettingsView(app) {
     const a = e.target.closest('[data-act]');
     if (!a) return;
     if (a.dataset.act === 'back') { Router.back('#/'); return; }
+    if (a.dataset.act === 'connect' || a.dataset.act === 'sync-now') {
+      a.disabled = true;
+      try {
+        await Sync.sync({ interactive: true });
+        if (a.dataset.act === 'connect') toast('Google Drive conectado');
+        Router.render();
+      } catch { a.disabled = false; }
+      return;
+    }
+    if (a.dataset.act === 'disconnect') {
+      const ok = await confirmSheet({ title: '¿Desconectar Google Drive?', text: 'Las recetas se quedan en este dispositivo y en tu Drive, pero dejarán de sincronizarse.', ok: 'Desconectar', danger: true });
+      if (ok) { await Sync.disconnect(); toast('Google Drive desconectado'); Router.render(); }
+      return;
+    }
     if (a.dataset.act === 'share' || a.dataset.act === 'download') {
       if (!recipes.length) { toast('Aún no hay recetas que copiar'); return; }
       a.disabled = true;
@@ -1398,6 +1445,7 @@ async function SettingsView(app) {
       await Sheets.open((el, close) => {
         el.innerHTML = `<h2 class="serif">Copia importada</h2>
           <p>${r.added} nuevas, ${r.updated} actualizadas, ${r.removed} eliminadas y ${r.same} sin cambios.</p>
+          ${r.missingPhotos ? `<p>${r.missingPhotos === 1 ? 'Faltaba 1 foto' : `Faltaban ${r.missingPhotos} fotos`} en el archivo. Para que lleguen, envía el archivo .zip tal cual, sin abrirlo ni descomprimirlo en el móvil.</p>` : ''}
           <div class="actions"><button class="btn btn-primary" data-close>Ver recetario</button></div>`;
         el.addEventListener('click', (ev) => { if (ev.target.closest('[data-close]')) close(true); });
       }, { label: 'Copia importada' });
@@ -1408,7 +1456,8 @@ async function SettingsView(app) {
   };
   app.addEventListener('click', onClick);
   app.addEventListener('change', onChange);
-  return { destroy: () => { app.removeEventListener('click', onClick); app.removeEventListener('change', onChange); } };
+  const offSync = Sync.on(async () => { const el = $('#sync-status', app); if (el) el.textContent = syncStatusText(await Meta.get('lastSync')); });
+  return { destroy: () => { app.removeEventListener('click', onClick); app.removeEventListener('change', onChange); offSync(); } };
 }
 
 /* =========================================================================
@@ -1500,6 +1549,69 @@ async function pickAndEditPhoto({ square, maxSide }) {
    9. Copias: exportar e importar (.zip con datos + fotos)
    ========================================================================= */
 
+/**
+ * Combina recetas que llegan de fuera (copia o Google Drive) con las de este dispositivo.
+ * Reglas: gana la versión editada más recientemente; una receta borrada después
+ * de su última edición se borra en todas partes.
+ * getImage(id) devuelve la foto que falta aquí (o null si no la tiene).
+ */
+async function mergeRemote(data, getImage) {
+  const [localRecipes, localTombs, localImageIds] = await Promise.all([DB.all('recipes'), DB.all('tombstones'), DB.keys('images')]);
+  const local = new Map(localRecipes.map((r) => [r.id, r]));
+  const tombs = new Map(localTombs.map((t) => [t.id, t]));
+  const haveImages = new Set(localImageIds);
+  const result = { added: 0, updated: 0, removed: 0, same: 0, missingPhotos: 0 };
+  const toPut = [], toDelete = [], newTombs = [];
+
+  for (const t of data.tombstones || []) {
+    const l = local.get(t.id);
+    if (l && l.updatedAt <= t.deletedAt) { toDelete.push(t.id); local.delete(t.id); result.removed++; }
+    const lt = tombs.get(t.id);
+    if (!lt || lt.deletedAt < t.deletedAt) newTombs.push(t);
+  }
+  for (const r of data.recipes || []) {
+    const tomb = tombs.get(r.id);
+    if (tomb && tomb.deletedAt >= r.updatedAt) continue; // la borraste aquí después
+    const l = local.get(r.id);
+    if (!l) { toPut.push(r); result.added++; }
+    else if (r.updatedAt > l.updatedAt) { toPut.push(r); result.updated++; }
+    else result.same++;
+  }
+
+  // Las fotos se consiguen antes de escribir: una transacción de la base de datos no puede esperar a la red
+  const images = [];
+  for (const id of referencedImages(toPut)) {
+    if (haveImages.has(id)) continue;
+    const blob = await getImage(id);
+    if (blob) images.push({ id, blob, createdAt: Date.now() });
+    else result.missingPhotos++;
+  }
+
+  if (toPut.length || toDelete.length || newTombs.length || images.length) {
+    await DB.tx(['recipes', 'images', 'tombstones'], 'readwrite', (t) => {
+      images.forEach((i) => t.objectStore('images').put(i));
+      toPut.forEach((r) => t.objectStore('recipes').put(r));
+      toDelete.forEach((id) => t.objectStore('recipes').delete(id));
+      newTombs.forEach((x) => t.objectStore('tombstones').put(x));
+    });
+    images.forEach((i) => Images.forget(i.id));
+  }
+  if (toPut.length || toDelete.length) await Meta.set('lastChange', Date.now());
+  requestPersistence();
+  result.changed = toPut.length + toDelete.length > 0;
+  return result;
+}
+
+/** Ids de todas las fotos que usan unas recetas. */
+function referencedImages(recipes) {
+  const ids = new Set();
+  for (const r of recipes) {
+    if (r.coverImageId) ids.add(r.coverImageId);
+    r.versions.forEach((v) => [...v.prep, ...v.cook].forEach((s) => s.imageId && ids.add(s.imageId)));
+  }
+  return ids;
+}
+
 const Backup = {
   FORMAT: 'recetario',
 
@@ -1543,61 +1655,294 @@ const Backup = {
 
   async import(file) {
     const { unzipSync, strFromU8 } = window.fflate;
-    let entries, data;
+    // Se admite la copia completa (.zip con fotos) y también el recetario.json suelto
+    // (pasa si el móvil descomprime el .zip al abrirlo): en ese caso llegan las recetas sin fotos.
+    let entries = {}, data;
     try {
-      entries = unzipSync(new Uint8Array(await file.arrayBuffer()));
-      data = JSON.parse(strFromU8(entries['recetario.json']));
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b; // los .zip empiezan por "PK"
+      if (isZip) {
+        entries = unzipSync(bytes);
+        data = JSON.parse(strFromU8(entries['recetario.json']));
+      } else {
+        data = JSON.parse(strFromU8(bytes));
+      }
     } catch { throw Object.assign(new Error('bad'), { userMessage: 'Ese archivo no es una copia del recetario.' }); }
     if (data?.format !== Backup.FORMAT || !Array.isArray(data.recipes)) throw Object.assign(new Error('bad'), { userMessage: 'Ese archivo no es una copia del recetario.' });
     if (data.formatVersion > 1) throw Object.assign(new Error('new'), { userMessage: 'Esa copia es de una versión más nueva de la app. Actualiza la app en este dispositivo.' });
 
-    const [localRecipes, localTombs, localImageIds] = await Promise.all([DB.all('recipes'), DB.all('tombstones'), DB.keys('images')]);
-    const local = new Map(localRecipes.map((r) => [r.id, r]));
-    const tombs = new Map(localTombs.map((t) => [t.id, t]));
-    const haveImages = new Set(localImageIds);
-    const result = { added: 0, updated: 0, removed: 0, same: 0 };
-    const toPut = [], toDelete = [], newTombs = [];
-
-    for (const t of data.tombstones || []) {
-      const l = local.get(t.id);
-      if (l && l.updatedAt <= t.deletedAt) { toDelete.push(t.id); local.delete(t.id); result.removed++; }
-      const lt = tombs.get(t.id);
-      if (!lt || lt.deletedAt < t.deletedAt) newTombs.push(t);
-    }
-    for (const r of data.recipes) {
-      const tomb = tombs.get(r.id);
-      if (tomb && tomb.deletedAt >= r.updatedAt) continue; // la borraste aquí después
-      const l = local.get(r.id);
-      if (!l) { toPut.push(r); result.added++; }
-      else if (r.updatedAt > l.updatedAt) { toPut.push(r); result.updated++; }
-      else result.same++;
-    }
-
-    // Fotos que faltan en este dispositivo
-    const needed = new Set();
-    for (const r of toPut) {
-      if (r.coverImageId) needed.add(r.coverImageId);
-      r.versions.forEach((v) => [...v.prep, ...v.cook].forEach((s) => s.imageId && needed.add(s.imageId)));
-    }
-    const images = [];
-    for (const id of needed) {
-      if (haveImages.has(id)) continue;
+    const result = await mergeRemote(data, async (id) => {
       const bytes = entries[`fotos/${id}`];
-      if (bytes) images.push({ id, blob: new Blob([bytes], { type: data.imageTypes?.[id] || 'image/webp' }), createdAt: Date.now() });
-    }
-
-    await DB.tx(['recipes', 'images', 'tombstones'], 'readwrite', (t) => {
-      images.forEach((i) => t.objectStore('images').put(i));
-      toPut.forEach((r) => t.objectStore('recipes').put(r));
-      toDelete.forEach((id) => t.objectStore('recipes').delete(id));
-      newTombs.forEach((x) => t.objectStore('tombstones').put(x));
+      return bytes ? new Blob([bytes], { type: data.imageTypes?.[id] || 'image/webp' }) : null;
     });
-    if (toPut.length || toDelete.length) await Meta.set('lastChange', Date.now());
-    requestPersistence();
-    Images.collectGarbage().catch(() => {});
+    Sync.schedule();
     return result;
   },
 };
+
+/* =========================================================================
+   9b. Sincronización con Google Drive
+   Las recetas se guardan en la carpeta privada y oculta de la app en tu Drive
+   (appDataFolder): solo esta app puede verla y no toca el resto de tu Drive.
+   Cada dispositivo sigue guardando todo en local; Drive solo sirve para
+   intercambiar cambios.
+   ========================================================================= */
+
+const Sync = (() => {
+  const CLIENT_ID = '124450345824-86oe6g0bgsn255o6m8pp83ijq5c1u6j9.apps.googleusercontent.com';
+  const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+  const FILES = 'https://www.googleapis.com/drive/v3/files';
+  const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
+  const INDEX_NAME = 'recetario-index.json';
+
+  // Estados: off (no conectado) · ok · syncing · needs-tap (hay que tocar para renovar permiso) · offline · error
+  let state = 'off';
+  let lastError = '';
+  let running = null;
+  let timer = null;
+  const listeners = new Set();
+  const emit = () => listeners.forEach((fn) => fn(state));
+  const setState = (s, err = '') => { state = s; lastError = err; emit(); };
+
+  /* ---------- Inicio de sesión con Google (Google Identity Services) ---------- */
+
+  let gisPromise = null;
+  function loadGis() {
+    if (window.google?.accounts?.oauth2) return Promise.resolve();
+    gisPromise ||= new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.async = true;
+      s.onload = resolve;
+      s.onerror = () => { gisPromise = null; reject(Object.assign(new Error('gis'), { offline: true })); };
+      document.head.append(s);
+    });
+    return gisPromise;
+  }
+
+  /** Devuelve un permiso válido. Si ha caducado, solo lo pide si el usuario acaba de tocar un botón. */
+  async function getToken(interactive) {
+    const saved = await Meta.get('driveToken');
+    if (saved && saved.expiresAt > Date.now() + 60e3) return saved.value;
+    if (!interactive) return null;
+    await loadGis();
+    const firstTime = !(await Meta.get('driveConnected'));
+    return new Promise((resolve, reject) => {
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPE,
+        callback: async (r) => {
+          if (r.error) return reject(Object.assign(new Error(r.error), { cancelled: true }));
+          if (!google.accounts.oauth2.hasGrantedAllScopes(r, SCOPE)) {
+            return reject(Object.assign(new Error('scope'), { userMessage: 'Falta el permiso de Drive. Vuelve a conectar y marca la casilla de Google Drive.' }));
+          }
+          await Meta.set('driveToken', { value: r.access_token, expiresAt: Date.now() + (Number(r.expires_in) || 3600) * 1000 });
+          await Meta.set('driveConnected', true);
+          resolve(r.access_token);
+        },
+        error_callback: (e) => {
+          const msg = e?.type === 'popup_failed_to_open'
+            ? 'Chrome no dejó abrir la ventana de Google. Vuelve a pulsar el botón.'
+            : '';
+          reject(Object.assign(new Error(e?.type || 'popup'), { cancelled: !msg, userMessage: msg }));
+        },
+      });
+      client.requestAccessToken({ prompt: firstTime ? 'consent' : '' });
+    });
+  }
+
+  /* ---------- Llamadas a Drive ---------- */
+
+  async function api(token, url, opts = {}) {
+    let r;
+    try { r = await fetch(url, { ...opts, headers: { Authorization: `Bearer ${token}`, ...(opts.headers || {}) } }); }
+    catch { throw Object.assign(new Error('net'), { offline: true }); }
+    if (r.status === 401) { await Meta.set('driveToken', null); throw Object.assign(new Error('auth'), { auth: true }); }
+    if (!r.ok) throw new Error(`Drive ${r.status}`);
+    return r;
+  }
+
+  async function listFiles(token) {
+    const out = [];
+    let page = '';
+    do {
+      const q = new URLSearchParams({ spaces: 'appDataFolder', pageSize: '1000', fields: 'nextPageToken,files(id,name,createdTime)' });
+      if (page) q.set('pageToken', page);
+      const data = await (await api(token, `${FILES}?${q}`)).json();
+      out.push(...(data.files || []));
+      page = data.nextPageToken || '';
+    } while (page);
+    return out;
+  }
+
+  /** Sube un archivo nuevo (multipart) o reemplaza el contenido de uno existente. */
+  async function upload(token, { id, name, blob }) {
+    if (id) {
+      await api(token, `${UPLOAD}/${id}?uploadType=media`, { method: 'PATCH', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob });
+      return;
+    }
+    const boundary = 'recetario' + Math.random().toString(36).slice(2);
+    const meta = JSON.stringify({ name, parents: ['appDataFolder'] });
+    const body = new Blob([
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n`,
+      `--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`, blob,
+      `\r\n--${boundary}--`,
+    ]);
+    await api(token, `${UPLOAD}?uploadType=multipart&fields=id`, { method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body });
+  }
+
+  /** Ejecuta tareas con un máximo de n a la vez (para no saturar la conexión del móvil). */
+  async function pool(items, n, fn) {
+    const queue = [...items];
+    await Promise.all(Array.from({ length: Math.min(n, queue.length) }, async () => { while (queue.length) await fn(queue.shift()); }));
+  }
+
+  /** JSON con las claves ordenadas: así dos dispositivos con los mismos datos generan el mismo texto. */
+  function canonical(v) {
+    if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+    if (v && typeof v === 'object') return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`;
+    return JSON.stringify(v ?? null);
+  }
+
+  /* ---------- Sincronizar ---------- */
+
+  async function run(interactive) {
+    if (!(await Meta.get('driveConnected')) && !interactive) { setState('off'); return null; }
+    setState('syncing');
+    try {
+      const token = await getToken(interactive);
+      if (!token) { setState('needs-tap'); return null; }
+
+      // 1. Qué hay en Drive
+      const files = await listFiles(token);
+      const indexFile = files.find((f) => f.name === INDEX_NAME);
+      const remoteImages = new Map(files.filter((f) => f.name.startsWith('img-')).map((f) => [f.name.slice(4), f]));
+      const remoteText = indexFile ? await (await api(token, `${FILES}/${indexFile.id}?alt=media`)).text() : '';
+      let remote = { recipes: [], tombstones: [] };
+      if (remoteText) { try { remote = JSON.parse(remoteText); } catch { /* índice dañado: se reescribe */ } }
+
+      // 2. Traer cambios de Drive a este dispositivo
+      const download = async (id) => {
+        const f = remoteImages.get(id);
+        return f ? (await api(token, `${FILES}/${f.id}?alt=media`)).blob() : null;
+      };
+      const result = await mergeRemote(remote, download);
+
+      // 3. Fotos que faltan aquí aunque la receta ya estuviera (p. ej. subida a medias)
+      const [recipes, tombstones, localIds] = await Promise.all([DB.all('recipes'), DB.all('tombstones'), DB.keys('images')]);
+      const have = new Set(localIds);
+      const used = referencedImages(recipes);
+      const missingHere = [...used].filter((id) => !have.has(id) && remoteImages.has(id));
+      let fetched = 0;
+      await pool(missingHere, 3, async (id) => {
+        const blob = await download(id);
+        if (blob) { await DB.put('images', { id, blob, createdAt: Date.now() }); fetched++; }
+      });
+
+      // 4. Subir a Drive las fotos que solo están aquí (siempre antes que el índice)
+      const toUpload = [...used].filter((id) => have.has(id) && !remoteImages.has(id));
+      await pool(toUpload, 3, async (id) => {
+        const rec = await DB.get('images', id);
+        if (rec) await upload(token, { name: `img-${id}`, blob: rec.blob });
+      });
+
+      // 5. Subir el índice de recetas si ha cambiado
+      const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+      const indexText = canonical({ format: 'recetario', formatVersion: 1, recipes: [...recipes].sort(byId), tombstones: [...tombstones].sort(byId) });
+      if (indexText !== remoteText) {
+        await upload(token, { id: indexFile?.id, name: INDEX_NAME, blob: new Blob([indexText], { type: 'application/json' }) });
+      }
+
+      // 6. Limpieza: fotos de Drive que ya no usa ninguna receta (con un día de margen
+      //    por si otro dispositivo está a mitad de subir una receta nueva)
+      const dayAgo = Date.now() - 864e5;
+      const orphans = [...remoteImages.entries()].filter(([id, f]) => !used.has(id) && Date.parse(f.createdTime) < dayAgo);
+      await pool(orphans, 3, async ([, f]) => { await api(token, `${FILES}/${f.id}`, { method: 'DELETE' }).catch(() => {}); });
+
+      await Meta.set('lastSync', Date.now());
+      await Meta.set('syncPending', false);
+      setState('ok');
+      result.fetched = fetched;
+      return result;
+    } catch (err) {
+      if (err.auth) setState('needs-tap');
+      else if (err.offline) setState('offline');
+      else if (err.cancelled) setState((await Meta.get('driveConnected')) ? 'needs-tap' : 'off');
+      else { console.error(err); setState('error', err.userMessage || 'No se pudo sincronizar. Vuelve a intentarlo en un momento.'); }
+      if (err.userMessage) toast(err.userMessage);
+      throw err;
+    }
+  }
+
+  /** Sincroniza (una sola a la vez). interactive: el usuario ha tocado un botón y se puede abrir Google. */
+  function sync({ interactive = false } = {}) {
+    if (running) return running;
+    running = run(interactive).then(async (result) => {
+      if (result && (result.changed || result.fetched)) {
+        const n = result.added + result.updated + result.removed;
+        toast(n ? `Recetario sincronizado: ${n} ${n === 1 ? 'cambio' : 'cambios'}` : 'Fotos sincronizadas');
+        refreshView();
+      }
+      return result;
+    }).finally(() => { running = null; });
+    return running;
+  }
+
+  /** Vuelve a pintar la pantalla con los datos nuevos, salvo si estás editando o cocinando. */
+  function refreshView() {
+    const h = location.hash || '#/';
+    if (Sheets.isOpen()) return;
+    if (/^#\/?$|^#\/receta\/|^#\/ajustes/.test(h)) Router.render();
+  }
+
+  /** Tras guardar o borrar: sincroniza en unos segundos si hay permiso; si no, queda pendiente. */
+  async function schedule() {
+    if (!(await Meta.get('driveConnected'))) return;
+    await Meta.set('syncPending', true);
+    clearTimeout(timer);
+    timer = setTimeout(() => sync().catch(() => {}), 1500);
+  }
+
+  async function disconnect() {
+    const saved = await Meta.get('driveToken');
+    try { if (saved?.value && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(saved.value, () => {}); } catch { /* */ }
+    await Meta.set('driveToken', null);
+    await Meta.set('driveConnected', false);
+    setState('off');
+  }
+
+  async function init() {
+    if (!(await Meta.get('driveConnected'))) { setState('off'); return; }
+    setState((await Meta.get('syncPending')) ? 'needs-tap' : 'ok');
+    loadGis().catch(() => {}); // precargar para que el botón responda al instante
+    sync().catch(() => {});
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState !== 'visible') return;
+      const last = await Meta.get('lastSync', 0);
+      if (Date.now() - last > 30e3) sync().catch(() => {});
+    });
+  }
+
+  return {
+    sync, schedule, disconnect, init,
+    get state() { return state; },
+    get lastError() { return lastError; },
+    on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+  };
+})();
+
+/** Botón de nube de la pantalla de inicio: muestra el estado y sincroniza al tocarlo. */
+function syncButtonHTML(state) {
+  const map = {
+    ok: ['cloud-check', 'Sincronizado con Google Drive. Toca para sincronizar ahora', ''],
+    syncing: ['refresh-cw', 'Sincronizando…', 'is-spinning'],
+    'needs-tap': ['cloud', 'Toca para sincronizar con Google Drive', 'has-dot'],
+    offline: ['cloud-off', 'Sin conexión. Se sincronizará al volver internet', ''],
+    error: ['cloud-alert', 'Error al sincronizar. Toca para reintentar', 'has-dot'],
+  };
+  const [ic, label, cls] = map[state] || map.ok;
+  return `<button class="icon-btn sync-btn ${cls}" data-act="sync" aria-label="${label}" title="${label}">${icon(ic)}</button>`;
+}
 
 /* =========================================================================
    10. Arranque
@@ -1640,5 +1985,6 @@ Router.add(/^\/ajustes$/, SettingsView);
     $('#app').innerHTML = '<div class="page"><p>No se pudo abrir el recetario. Cierra la app y vuelve a abrirla.</p></div>';
   }
   registerServiceWorker();
+  Sync.init().catch(() => {});
   setTimeout(() => Images.collectGarbage().catch(() => {}), 4000);
 })();
