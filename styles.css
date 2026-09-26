@@ -559,3 +559,97 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
 }
 .sync-btn.is-spinning .ic { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Barra inferior de secciones ---------- */
+.page.has-tabbar { padding-bottom: calc(var(--safe-bottom) + 170px); }
+.tabbar {
+  position: fixed; z-index: 25; left: 0; right: 0; bottom: 0;
+  display: flex; justify-content: center; gap: 4px;
+  padding: 8px 12px calc(var(--safe-bottom) + 8px);
+  background: rgba(0, 0, 0, .86); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border-top: 1px solid var(--line);
+}
+.tab {
+  flex: 0 1 160px; min-height: 52px; border-radius: 14px;
+  display: grid; justify-items: center; align-content: center; gap: 2px;
+  color: var(--text-3); text-decoration: none; font-size: 12px;
+  transition: color var(--dur) var(--ease), background var(--dur);
+}
+.tab .ic { width: 22px; height: 22px; }
+.tab.is-on { color: var(--accent); }
+.tab:active { background: var(--s1); }
+.has-tabbar ~ .fab, .fab { bottom: calc(var(--safe-bottom) + 88px); }
+
+/* ---------- Miniaturas y selector de recetas ---------- */
+.thumb { width: 52px; height: 52px; flex: none; display: grid; place-items: center; color: var(--s3); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%;
+  -webkit-mask-image: radial-gradient(closest-side, #000 80%, transparent 100%); mask-image: radial-gradient(closest-side, #000 80%, transparent 100%); }
+.thumb svg { width: 100%; height: 100%; }
+.pick-list { display: grid; gap: 2px; max-height: 58dvh; overflow: auto; margin: 0 calc(var(--pad) * -.5); }
+.pick-row { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 6px 12px; border: 0; border-radius: 14px; background: transparent; text-align: left; }
+.pick-row:hover { background: var(--s2); }
+.pick-row > span:last-child { display: grid; }
+.pick-name { font-size: 18px; }
+.pick-meta { font-size: 13px; color: var(--text-3); white-space: pre; }
+
+/* ---------- Menú semanal ---------- */
+.week-nav { display: flex; align-items: center; gap: 6px; margin: 16px 0 6px; }
+.week-range { font-size: 16px; min-width: 150px; text-align: center; font-variant-numeric: tabular-nums; }
+.week { display: grid; gap: 14px; margin-top: 10px; }
+@media (min-width: 720px) { .week { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1080px) { .week { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.day { padding: 14px; border-radius: var(--r-card); background: #0b0a09; border: 1px solid var(--line); display: grid; gap: 8px; }
+.day.is-today { border-color: #5b4420; }
+.day-name { margin: 0 0 2px; display: flex; justify-content: space-between; align-items: baseline; font-size: 20px; font-weight: 400; }
+.day-name span:last-child { font-size: 14px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.day.is-today .day-name span:last-child { color: var(--accent); }
+.slot {
+  display: flex; align-items: center; gap: 12px; min-height: 64px; width: 100%;
+  padding: 6px 12px 6px 10px; border-radius: 14px; border: 1px dashed var(--s3); background: transparent; text-align: left;
+  transition: background var(--dur) var(--ease);
+}
+.slot.is-filled { border-style: solid; border-color: transparent; background: var(--s1); }
+.slot:active { transform: scale(.99); }
+.slot-label { width: 52px; flex: none; font-size: 12px; color: var(--text-3); }
+.slot-add { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 14px; }
+.slot-body { display: grid; min-width: 0; }
+.slot-name { font-size: 17px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot-meta { font-size: 13px; color: var(--text-3); }
+.slot .thumb { width: 44px; height: 44px; }
+.week-cta { margin-top: 22px; max-width: 520px; }
+
+/* ---------- Lista de la compra ---------- */
+.shop { max-width: 760px; margin: 0 auto; }
+.shop-recipes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.shop-recipe { display: flex; align-items: center; gap: 12px; padding: 6px 4px 6px 8px; border-radius: 14px; background: var(--s1); }
+.shop-recipe .thumb { width: 44px; height: 44px; }
+.shop-recipe-body { flex: 1; min-width: 0; display: grid; }
+.shop-recipe-body .serif { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shop-recipe .stepper .icon-btn { width: 36px; height: 36px; }
+.shop-recipe > .icon-btn { width: 40px; height: 40px; color: var(--text-3); }
+.add-item { position: relative; display: flex; align-items: center; }
+.add-item .ic { position: absolute; left: 14px; color: var(--accent); pointer-events: none; }
+.add-item .input { padding-left: 42px; }
+.shop-section { margin-top: 24px; }
+.shop-sec { margin: 0 0 4px; font-size: 13px; font-weight: 500; color: var(--accent); }
+.shop-list { list-style: none; margin: 0; padding: 0; }
+.shop-item {
+  display: grid; grid-template-columns: 28px 1fr auto auto; align-items: center; gap: 12px;
+  min-height: 52px; border-bottom: 1px solid var(--line); cursor: pointer;
+}
+.shop-item .tick { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--s3); display: grid; place-items: center; color: transparent; transition: all var(--dur) var(--ease); }
+.shop-name { font-size: 16px; display: grid; }
+.shop-from { font-size: 12px; color: var(--text-3); }
+.shop-qty { font-size: 15px; color: var(--accent); font-variant-numeric: tabular-nums; text-align: right; }
+.shop-item .icon-btn { width: 40px; height: 40px; color: var(--text-3); }
+.shop-item.is-done { opacity: .45; }
+.shop-item.is-done .tick { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.shop-item.is-done .shop-name { text-decoration: line-through; text-decoration-color: var(--text-3); }
+.shop-done-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; border: 0; background: none; color: var(--text-2); font-size: 14px; padding: 0; }
+
+/* ---------- Manos libres y tarjeta ---------- */
+.cook .icon-btn.is-on { color: var(--accent); }
+.cook .icon-btn.is-on .ic { fill: none; }
+.voice-hint { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--accent); }
+.card-preview { width: 100%; max-width: 480px; margin: 6px auto 0; border-radius: 12px; border: 1px solid var(--line); }
+.day.is-past { opacity: .55; }

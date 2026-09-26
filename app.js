@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 
 /* =========================================================================
    1. Utilidades
@@ -337,6 +337,143 @@ const Store = {
 };
 
 /* =========================================================================
+   4b. Documentos sincronizables: menú semanal y lista de la compra
+   Cada documento es un mapa clave → entrada con su propia fecha de cambio.
+   Al sincronizar gana, clave a clave, la entrada más reciente; así puedes
+   tachar en el móvil mientras añades cosas en la tablet sin pisarte.
+   Las entradas borradas se guardan como { removed: true } para que el borrado viaje.
+   ========================================================================= */
+
+const Docs = (() => {
+  const NAMES = ['plan', 'shopRecipes', 'shopManual', 'shopChecks'];
+  const listeners = new Set();
+
+  const get = async (name) => (await Meta.get(`doc:${name}`)) || {};
+  const live = (map) => Object.fromEntries(Object.entries(map).filter(([, v]) => !v.removed));
+
+  async function put(name, key, value, { quiet = false } = {}) {
+    const map = await get(name);
+    map[key] = { ...value, updatedAt: Date.now() };
+    await Meta.set(`doc:${name}`, map);
+    if (!quiet) listeners.forEach((fn) => fn(name));
+    Sync.schedule();
+  }
+  const remove = (name, key, opts) => put(name, key, { removed: true }, opts);
+
+  /** Borra muchas claves de golpe (p. ej. "vaciar lista"). */
+  async function removeMany(name, keys) {
+    if (!keys.length) return;
+    const map = await get(name);
+    const now = Date.now();
+    keys.forEach((k) => { map[k] = { removed: true, updatedAt: now }; });
+    await Meta.set(`doc:${name}`, map);
+    listeners.forEach((fn) => fn(name));
+    Sync.schedule();
+  }
+
+  /** Combina lo que llega de fuera. Devuelve true si ha cambiado algo aquí. */
+  async function merge(remoteDocs = {}) {
+    let changed = false;
+    for (const name of NAMES) {
+      const remote = remoteDocs[name];
+      if (!remote) continue;
+      const local = await get(name);
+      let touched = false;
+      for (const [k, v] of Object.entries(remote)) {
+        if (!local[k] || (v.updatedAt || 0) > (local[k].updatedAt || 0)) { local[k] = v; touched = true; }
+      }
+      if (touched) { await Meta.set(`doc:${name}`, local); changed = true; }
+    }
+    if (changed) listeners.forEach((fn) => fn('*'));
+    return changed;
+  }
+
+  async function all() {
+    const out = {};
+    for (const name of NAMES) out[name] = await get(name);
+    return out;
+  }
+
+  return { get, live, put, remove, removeMany, merge, all, on(fn) { listeners.add(fn); return () => listeners.delete(fn); } };
+})();
+
+/* ---------- Lista de la compra: suma y agrupación de ingredientes ---------- */
+
+const Shopping = (() => {
+  // Pasillos del súper, en el orden en que sueles recorrerlo
+  const SECTIONS = [
+    ['Frutas y verduras', 'tomate cebolla ajo pimiento patata zanahoria calabacin berenjena puerro lechuga espinaca acelga col coliflor brocoli judia guisante alcachofa champinon seta pepino apio calabaza limon lima naranja manzana pera platano fresa uva melon sandia aguacate perejil cilantro albahaca hierbabuena romero tomillo laurel jengibre fruta verdura'],
+    ['Carnes', 'pollo pavo ternera cerdo cordero conejo carne picada lomo solomillo costilla chuleta panceta bacon chorizo morcilla salchicha jamon butifarra hamburguesa muslo pechuga contramuslo'],
+    ['Pescados y mariscos', 'pescado merluza bacalao salmon atun sardina boqueron dorada lubina rape gamba langostino calamar sepia pulpo mejillon almeja chirla navaja marisco cigala bogavante fumet'],
+    ['Lácteos y huevos', 'leche nata mantequilla queso yogur huevo huevos crema'],
+    ['Panadería', 'pan baguette hogaza pan rallado tostada brioche'],
+    ['Despensa', 'arroz pasta espagueti macarron fideo harina azucar sal pimienta aceite vinagre garbanzo lenteja alubia judion legumbre tomate frito tomate triturado caldo pastilla levadura cacao chocolate especia pimenton comino azafran canela oregano curry nuez almendra pinon avellana pasas miel mostaza mayonesa ketchup salsa soja conserva maicena'],
+    ['Bebidas', 'vino cerveza agua zumo refresco brandy cognac licor'],
+    ['Congelados', 'congelado helado hielo'],
+  ];
+  const SECTION_WORDS = SECTIONS.map(([name, words]) => [name, words.split(' ')]);
+
+  function sectionFor(name) {
+    const n = ' ' + norm(name) + ' ';
+    // "tomate frito" antes que "tomate": se buscan primero las coincidencias más largas
+    let best = null, bestLen = 0;
+    for (const [sec, words] of SECTION_WORDS) {
+      for (const w of words) {
+        if (w.length > bestLen && (n.includes(' ' + w + ' ') || n.includes(' ' + w + 's ') || n.includes(' ' + w + 'es '))) { best = sec; bestLen = w.length; }
+      }
+    }
+    return best || 'Otros';
+  }
+  const ORDER = [...SECTIONS.map(([s]) => s), 'Otros'];
+
+  // Unidades que se pueden sumar entre sí
+  const BASE = { g: ['g', 1], kg: ['g', 1000], ml: ['ml', 1], l: ['ml', 1000] };
+
+  // En la compra se redondea hacia arriba: no se compran 2¼ pimientos
+  const up = (n, step) => Math.ceil(n / step - 1e-9) * step;
+  function display(qty, unit) {
+    if (qty == null) return unit === 'al gusto' ? 'al gusto' : unit === 'pizca' ? 'una pizca' : '';
+    if (unit === 'g' && qty >= 1000) return `${formatQty(up(qty / 1000, 0.1), 'kg')} kg`;
+    if (unit === 'ml' && qty >= 1000) return `${formatQty(up(qty / 1000, 0.1), 'l')} l`;
+    if (['ud', 'diente', ''].includes(unit)) return qtyLabel(up(qty, 1), unit);
+    if (['g', 'ml'].includes(unit)) return qtyLabel(up(qty, qty >= 100 ? 10 : 1), unit);
+    return qtyLabel(up(qty, 0.25), unit);
+  }
+
+  /**
+   * Suma los ingredientes de las recetas elegidas.
+   * selections: [{ recipeId, versionId, servings }]
+   * Devuelve [{ key, name, label, section, from: [nombres de receta] }]
+   */
+  function aggregate(selections, recipesById) {
+    const acc = new Map();
+    for (const sel of selections) {
+      const r = recipesById.get(sel.recipeId);
+      if (!r) continue;
+      const v = r.versions.find((x) => x.id === sel.versionId) || r.versions[0];
+      const factor = (sel.servings || v.servings || 1) / (v.servings || 1);
+      for (const i of v.ingredients) {
+        if (!i.name.trim()) continue;
+        const [baseUnit, mult] = BASE[i.unit] || [i.unit, 1];
+        const key = `${norm(i.name)}|${baseUnit}`;
+        const cur = acc.get(key) || { key, name: i.name.trim(), unit: baseUnit, qty: null, from: new Set() };
+        if (i.qty != null) {
+          const q = NO_SCALE_UNITS.has(i.unit) ? i.qty : i.qty * factor;
+          cur.qty = (cur.qty || 0) + q * mult;
+        }
+        cur.from.add(r.name);
+        acc.set(key, cur);
+      }
+    }
+    return [...acc.values()].map((x) => ({
+      key: x.key, name: x.name, label: display(x.qty, x.unit), section: sectionFor(x.name), from: [...x.from],
+    }));
+  }
+
+  return { aggregate, sectionFor, ORDER };
+})();
+
+/* =========================================================================
    5. Interfaz común: avisos, hojas, confirmaciones
    ========================================================================= */
 
@@ -529,7 +666,7 @@ async function HomeView(app) {
   const todayRaw = new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
   const today = todayRaw.charAt(0).toUpperCase() + todayRaw.slice(1);
 
-  app.innerHTML = `<div class="page">
+  app.innerHTML = `<div class="page has-tabbar">
     <header class="home-head">
       <div class="topbar">
         <p class="home-date">${esc(today)}</p>
@@ -553,7 +690,8 @@ async function HomeView(app) {
       </div>
       <div id="results"></div>` : emptyHome()}
   </div>
-  <button class="fab" data-go="#/editar/nueva">${icon('plus')}Nueva receta</button>`;
+  <button class="fab" data-go="#/editar/nueva">${icon('plus')}Nueva receta</button>
+  ${tabbarHTML('home')}`;
 
   const results = $('#results', app);
   const paint = () => { if (results) results.innerHTML = homeResults(recipes); };
@@ -723,6 +861,7 @@ async function RecipeView(app, id, params) {
         <button class="icon-btn glass" data-act="back" aria-label="Volver">${icon('arrow-left')}</button>
         <div class="row">
           <button class="icon-btn glass ${recipe.favorite ? 'is-on' : ''}" data-act="fav" aria-pressed="${recipe.favorite}" aria-label="Favorita">${icon('heart')}</button>
+          <button class="icon-btn glass" data-act="card" aria-label="Compartir tarjeta de la receta">${icon('share-2')}</button>
           <button class="icon-btn glass" data-act="menu" aria-label="Más opciones">${icon('ellipsis-vertical')}</button>
         </div>
       </div>
@@ -754,6 +893,7 @@ async function RecipeView(app, id, params) {
               </div>
             </div>
             <div id="ings">${ingredientsHTML()}</div>
+            ${version.ingredients.length ? `<button class="btn add-row" data-act="to-shop" style="margin-top:14px">${icon('shopping-cart', 'ic-sm')}Añadir a la lista de la compra</button>` : ''}
           </section>
           <section class="block">
             <div class="block-head"><h2 class="block-title serif">Pasos</h2></div>
@@ -802,6 +942,12 @@ async function RecipeView(app, id, params) {
         break;
       case 'cook': Router.go(`#/cocinar/${recipe.id}?v=${version.id}&r=${servings}`); break;
       case 'new-version': newVersionFlow(recipe, version); break;
+      case 'to-shop': addToShopping(recipe.id, version.id, servings); break;
+      case 'card':
+        a.disabled = true;
+        try { await shareCardFlow(recipe, version, servings); } catch { toast('No se pudo crear la tarjeta'); }
+        a.disabled = false;
+        break;
       case 'menu': recipeMenu(recipe, version, setVersion); break;
     }
   };
@@ -833,12 +979,14 @@ async function recipeMenu(recipe, version, setVersion) {
   const multi = recipe.versions.length > 1;
   const choice = await menuSheet('Opciones de la receta', [
     { icon: 'pencil', label: multi ? `Editar versión “${version.name}”` : 'Editar receta', value: 'edit' },
+    { icon: 'calendar-days', label: 'Añadir al menú de la semana', value: 'plan' },
     { icon: 'copy', label: 'Duplicar esta versión', value: 'dup' },
     ...(multi ? [{ icon: 'trash-2', label: `Eliminar versión “${version.name}”`, value: 'del-version', danger: true }] : []),
     { icon: 'trash-2', label: 'Eliminar receta completa', value: 'del', danger: true },
   ]);
   if (choice === 'edit') Router.go(`#/editar/${recipe.id}?v=${version.id}`);
   if (choice === 'dup') newVersionFlow(recipe, version);
+  if (choice === 'plan') addToPlanFlow(recipe, version);
   if (choice === 'del-version') {
     if (!(await confirmSheet({ title: `¿Eliminar “${version.name}”?`, text: 'Se borra solo esta versión. El resto de la receta se mantiene.', ok: 'Eliminar versión', danger: true }))) return;
     recipe.versions = recipe.versions.filter((v) => v.id !== version.id);
@@ -853,6 +1001,34 @@ async function recipeMenu(recipe, version, setVersion) {
     toast('Receta eliminada');
     Router.go('#/');
   }
+}
+
+/** Hoja para elegir día y comida/cena y apuntar la receta en el menú. */
+async function addToPlanFlow(recipe, version) {
+  const days = Array.from({ length: 14 }, (_, i) => Dates.addDays(new Date(), i));
+  let day = Dates.key(days[0]);
+  let slot = new Date().getHours() < 16 ? 'comida' : 'cena';
+  const plan = Docs.live(await Docs.get('plan'));
+  const label = (d, i) => (i === 0 ? 'Hoy' : i === 1 ? 'Mañana' : `${Dates.weekday(d).slice(0, 3)} ${d.getDate()}`);
+  const ok = await Sheets.open((el, close) => {
+    const paint = () => {
+      const taken = plan[`${day}|${slot}`];
+      el.innerHTML = `<h2 class="serif">Añadir al menú</h2><p>${esc(recipe.name)}</p>
+        <div class="chips" style="margin-bottom:12px">${days.map((d, i) => `<button class="chip ${Dates.key(d) === day ? 'is-on' : ''}" data-d="${Dates.key(d)}">${label(d, i)}</button>`).join('')}</div>
+        <div class="segmented">${SLOTS.map(([k, l]) => `<button data-s="${k}" aria-selected="${k === slot}">${l}</button>`).join('')}</div>
+        ${taken ? `<p class="hint">Ese hueco ya tiene receta: se sustituirá.</p>` : ''}
+        <div class="actions"><button class="btn btn-ghost" data-c="0">Cancelar</button><button class="btn btn-primary" data-c="1">Añadir</button></div>`;
+    };
+    paint();
+    el.addEventListener('click', (e) => {
+      const d = e.target.closest('[data-d]'); if (d) { day = d.dataset.d; paint(); return; }
+      const sl = e.target.closest('[data-s]'); if (sl) { slot = sl.dataset.s; paint(); return; }
+      const c = e.target.closest('[data-c]'); if (c) close(c.dataset.c === '1');
+    });
+  }, { label: 'Añadir al menú' });
+  if (!ok) return;
+  await Docs.put('plan', `${day}|${slot}`, { recipeId: recipe.id, versionId: version.id, servings: version.servings || 2 });
+  toast('Añadida al menú', { label: 'Ver menú', run: () => Router.go('#/menu') });
 }
 
 /* ---------- 7.3 Editor ---------- */
@@ -1223,10 +1399,14 @@ async function CookView(app, id, params) {
         <div class="topbar">
           <button class="icon-btn" data-act="close" aria-label="Salir del modo cocina">${icon('x')}</button>
           <span>Paso ${index + 1} de ${steps.length}</span>
-          <button class="icon-btn" data-act="ings" aria-label="Ver ingredientes">${icon('list')}</button>
+          <div style="display:flex">
+            ${Voice.supported.speak ? `<button class="icon-btn ${Voice.active ? 'is-on' : ''}" data-act="voice" aria-pressed="${Voice.active}" aria-label="${Voice.active ? 'Desactivar manos libres' : 'Activar manos libres'}">${icon(Voice.active ? 'mic' : 'mic-off')}</button>` : ''}
+            <button class="icon-btn" data-act="ings" aria-label="Ver ingredientes">${icon('list')}</button>
+          </div>
         </div>
         <div class="progress" aria-hidden="true">${steps.map((_, i) => `<i class="${i <= index ? 'on' : ''}"></i>`).join('')}</div>
         <div class="running-timers" id="running">${runningHTML()}</div>
+        ${Voice.active ? `<p class="voice-hint">${icon('volume-2', 'ic-sm')}${Voice.supported.listen ? 'Di «siguiente», «anterior», «repite», «temporizador» o «ingredientes»' : 'Leyendo los pasos en voz alta'}</p>` : ''}
       </header>
       <section class="cook-body" aria-live="polite">
         ${s.imageId && Images.cached(s.imageId)
@@ -1258,7 +1438,25 @@ async function CookView(app, id, params) {
   };
   const off = Timers.on(update);
 
-  const move = (d) => { const n = index + d; if (n < 0 || n >= steps.length) return; index = n; paint(); };
+  const readStep = () => {
+    const s = steps[index];
+    Voice.speak(`Paso ${index + 1}. ${s.text}${s.timerMin ? `. Temporizador de ${formatMinutes(s.timerMin).replace('min', 'minutos').replace(' h', ' horas')}.` : ''}`);
+  };
+  const move = (d) => { const n = index + d; if (n < 0 || n >= steps.length) return; index = n; paint(); readStep(); };
+  const voiceHandlers = {
+    next: () => { if (index === steps.length - 1) Voice.speak('Es el último paso. ¡Que aproveche!'); else move(1); },
+    prev: () => move(-1),
+    repeat: readStep,
+    timer: () => { const s = steps[index]; if (s.timerMin) { Timers.start(s.id, s.timerMin, `paso ${index + 1}`); Voice.speak('Temporizador en marcha.'); } else Voice.speak('Este paso no tiene temporizador.'); },
+    pause: () => { Timers.pause(steps[index].id); },
+    ingredients: () => {
+      const factor = servings / (version.servings || 1);
+      Voice.speak('Ingredientes: ' + version.ingredients.map((i) => {
+        const q = i.qty == null ? null : (NO_SCALE_UNITS.has(i.unit) ? i.qty : i.qty * factor);
+        return `${qtyLabel(q, i.unit)} ${i.name}`.replace(/\bg\b/, 'gramos').replace(/\bml\b/, 'mililitros');
+      }).join(', '));
+    },
+  };
 
   async function showIngredients() {
     const factor = servings / (version.servings || 1);
@@ -1287,6 +1485,15 @@ async function CookView(app, id, params) {
       case 'pause': Timers.pause(s.id); break;
       case 'reset': Timers.reset(s.id); $('#timer', app).innerHTML = timerHTML(s); break;
       case 'ings': showIngredients(); break;
+      case 'voice':
+        if (Voice.active) { Voice.stop(); toast('Manos libres desactivado'); }
+        else {
+          Voice.start(voiceHandlers, (st) => { if (st === 'denied') paint(); });
+          if (!Voice.supported.listen) toast('Este navegador no reconoce la voz: solo leeré los pasos.');
+          readStep();
+        }
+        paint();
+        break;
       case 'close': Router.back(`#/receta/${id}?v=${version.id}`); break;
       case 'finish':
         recipe.lastCookedAt = Date.now();
@@ -1324,6 +1531,7 @@ async function CookView(app, id, params) {
     },
     destroy: () => {
       off();
+      Voice.stop();
       wakeLock?.release?.().catch(() => {});
       document.removeEventListener('visibilitychange', onVisible);
       document.removeEventListener('keydown', onKey);
@@ -1332,6 +1540,360 @@ async function CookView(app, id, params) {
       app.removeEventListener('touchend', onTouchEnd);
     },
   };
+}
+
+/* ---------- 7.6 Barra inferior y utilidades compartidas ---------- */
+
+function tabbarHTML(active) {
+  const tab = (href, ic, label, key) =>
+    `<a class="tab ${active === key ? 'is-on' : ''}" href="${href}" ${active === key ? 'aria-current="page"' : ''}>${icon(ic)}<span>${label}</span></a>`;
+  return `<nav class="tabbar" aria-label="Secciones">
+    ${tab('#/', 'book-open', 'Recetas', 'home')}${tab('#/menu', 'calendar-days', 'Menú', 'menu')}${tab('#/compra', 'shopping-cart', 'Compra', 'shop')}
+  </nav>`;
+}
+
+/** Miniatura redonda para listas (menú, compra, selector). */
+function thumbHTML(imageId) {
+  const src = Images.cached(imageId);
+  return `<span class="thumb">${src ? `<img src="${src}" alt="">` : PLATE_SVG}</span>`;
+}
+
+/** Hoja para elegir una receta con buscador. Devuelve la receta o undefined. */
+async function pickRecipe(title = 'Elige una receta') {
+  const recipes = (await Store.list()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  await Images.preload(recipes.map((r) => r.coverImageId));
+  if (!recipes.length) { toast('Aún no tienes recetas'); return undefined; }
+  return Sheets.open((el, close) => {
+    el.innerHTML = `<h2 class="serif">${esc(title)}</h2>
+      <label class="search" style="margin:4px 0 12px"><span class="sr-only">Buscar</span>${icon('search', 'ic-sm')}
+        <input class="input" type="search" placeholder="Buscar receta" autocomplete="off"></label>
+      <div class="pick-list"></div>`;
+    const list = $('.pick-list', el);
+    const input = $('input', el);
+    const paint = () => {
+      const found = recipes.filter((r) => matchesQuery(r, input.value));
+      list.innerHTML = found.map((r) => `<button class="pick-row" data-id="${r.id}">${thumbHTML(r.coverImageId)}
+        <span><span class="pick-name serif">${esc(r.name)}</span><span class="pick-meta">${esc([r.category, formatMinutes(r.versions[0].minutes)].filter(Boolean).join('   '))}</span></span></button>`).join('')
+        || '<p class="muted-empty">No hay recetas con ese nombre.</p>';
+    };
+    paint();
+    input.addEventListener('input', paint);
+    list.addEventListener('click', (e) => { const b = e.target.closest('[data-id]'); if (b) close(recipes.find((r) => r.id === b.dataset.id)); });
+  }, { label: title });
+}
+
+/* ---------- Fechas del menú ---------- */
+
+const Dates = {
+  key: (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+  monday(offsetWeeks = 0) {
+    const d = new Date(); d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + offsetWeeks * 7);
+    return d;
+  },
+  addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; },
+  short: (d) => d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }).replace('.', ''),
+  weekday: (d) => { const w = d.toLocaleDateString('es-ES', { weekday: 'long' }); return w.charAt(0).toUpperCase() + w.slice(1); },
+};
+const SLOTS = [['comida', 'Comida'], ['cena', 'Cena']];
+
+/* ---------- Añadir a la lista de la compra ---------- */
+
+async function addToShopping(recipeId, versionId, servings, { silent = false } = {}) {
+  const key = `${recipeId}|${versionId}`;
+  const cur = Docs.live(await Docs.get('shopRecipes'))[key];
+  await Docs.put('shopRecipes', key, { recipeId, versionId, servings: (cur?.servings || 0) + servings });
+  if (!silent) toast('Añadida a la lista de la compra', { label: 'Ver lista', run: () => Router.go('#/compra') });
+}
+
+/* ---------- 7.7 Menú semanal ---------- */
+
+async function MenuView(app) {
+  UI.menuWeek ??= 0;
+  const recipes = await Store.list();
+  const byId = new Map(recipes.map((r) => [r.id, r]));
+  await Images.preload(recipes.map((r) => r.coverImageId));
+  let firstPaint = true;
+
+  async function paint() {
+    const plan = Docs.live(await Docs.get('plan'));
+    const monday = Dates.monday(UI.menuWeek);
+    const days = Array.from({ length: 7 }, (_, i) => Dates.addDays(monday, i));
+    const todayKey = Dates.key(new Date());
+    const weekEntries = days.flatMap((d) => SLOTS.map(([s]) => plan[`${Dates.key(d)}|${s}`]).filter((e) => e && byId.has(e.recipeId)));
+    const y = window.scrollY;
+
+    app.innerHTML = `<div class="page has-tabbar">
+      <header class="home-head">
+        <div class="topbar"><p class="home-date">${UI.menuWeek === 0 ? 'Esta semana' : UI.menuWeek === 1 ? 'La semana que viene' : UI.menuWeek === -1 ? 'La semana pasada' : ''}</p></div>
+        <h1 class="home-title serif">Menú</h1>
+      </header>
+      <div class="week-nav">
+        <button class="icon-btn" data-act="prev" aria-label="Semana anterior">${icon('chevron-left')}</button>
+        <span class="week-range">${Dates.short(days[0])} – ${Dates.short(days[6])}</span>
+        <button class="icon-btn" data-act="next" aria-label="Semana siguiente">${icon('chevron-right')}</button>
+        ${UI.menuWeek !== 0 ? `<button class="chip" data-act="today">Hoy</button>` : ''}
+      </div>
+      <div class="week">
+        ${days.map((d) => {
+          const k = Dates.key(d);
+          return `<section class="day ${k === todayKey ? 'is-today' : k < todayKey ? 'is-past' : ''}" aria-label="${Dates.weekday(d)} ${d.getDate()}">
+            <h2 class="day-name"><span class="serif">${Dates.weekday(d)}</span><span>${d.getDate()}</span></h2>
+            ${SLOTS.map(([s, label]) => {
+              const e = plan[`${k}|${s}`];
+              const r = e && byId.get(e.recipeId);
+              return r
+                ? `<button class="slot is-filled" data-slot="${k}|${s}"><span class="slot-label">${label}</span>${thumbHTML(r.coverImageId)}
+                    <span class="slot-body"><span class="slot-name serif">${esc(r.name)}</span><span class="slot-meta">${e.servings} ${e.servings === 1 ? 'ración' : 'raciones'}</span></span></button>`
+                : `<button class="slot" data-slot="${k}|${s}"><span class="slot-label">${label}</span><span class="slot-add">${icon('plus', 'ic-sm')}Añadir</span></button>`;
+            }).join('')}
+          </section>`;
+        }).join('')}
+      </div>
+      ${weekEntries.length ? `<div class="week-cta"><button class="btn btn-primary btn-block" data-act="to-shop">${icon('shopping-cart', 'ic-sm')}Añadir la semana a la lista de la compra</button></div>` : ''}
+    </div>
+    ${tabbarHTML('menu')}`;
+    if (firstPaint && UI.menuWeek === 0) {
+      firstPaint = false;
+      const today = $('.day.is-today', app);
+      if (today && today.getBoundingClientRect().top > innerHeight * 0.6) window.scrollTo(0, today.offsetTop - 90);
+    } else window.scrollTo(0, y);
+  }
+
+  async function editSlot(key) {
+    const plan = Docs.live(await Docs.get('plan'));
+    const e = plan[key];
+    if (!e || !byId.has(e.recipeId)) {
+      const r = await pickRecipe('¿Qué cocinas?');
+      if (!r) return;
+      await Docs.put('plan', key, { recipeId: r.id, versionId: r.versions[0].id, servings: r.versions[0].servings || 2 });
+      return;
+    }
+    const r = byId.get(e.recipeId);
+    let servings = e.servings;
+    let versionId = e.versionId;
+    const [day, slot] = key.split('|');
+    const when = `${SLOTS.find(([k]) => k === slot)[1]} del ${Dates.weekday(new Date(day + 'T12:00')).toLowerCase()}`;
+    const choice = await Sheets.open((el, close) => {
+      const paintSheet = () => {
+        el.innerHTML = `<p class="hint" style="margin:0 0 4px">${esc(when)}</p><h2 class="serif">${esc(r.name)}</h2>
+          ${r.versions.length > 1 ? `<div class="chips" style="margin:10px 0 4px">${r.versions.map((v) => `<button class="chip ${v.id === versionId ? 'is-on' : ''}" data-v="${v.id}">${esc(v.name)}</button>`).join('')}</div>` : ''}
+          <div class="block-head" style="margin:16px 0"><span class="label">Raciones</span>
+            <div class="stepper"><button class="icon-btn" data-s="-1" aria-label="Menos raciones">${icon('minus', 'ic-sm')}</button>
+            <output>${servings} ${servings === 1 ? 'ración' : 'raciones'}</output>
+            <button class="icon-btn" data-s="1" aria-label="Más raciones">${icon('plus', 'ic-sm')}</button></div></div>
+          <div class="actions" style="justify-content:space-between">
+            <button class="btn btn-danger" data-c="remove">Quitar</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-c="change">Cambiar</button><button class="btn" data-c="open">Ver receta</button><button class="btn btn-primary" data-c="save">Hecho</button></div>
+          </div>`;
+      };
+      paintSheet();
+      el.addEventListener('click', (ev) => {
+        const v = ev.target.closest('[data-v]'); if (v) { versionId = v.dataset.v; paintSheet(); return; }
+        const st = ev.target.closest('[data-s]'); if (st) { servings = Math.max(1, Math.min(99, servings + +st.dataset.s)); paintSheet(); return; }
+        const c = ev.target.closest('[data-c]'); if (c) close(c.dataset.c);
+      });
+    }, { label: r.name });
+
+    if (choice === 'remove') { await Docs.remove('plan', key); return; }
+    if (choice === 'change') {
+      const nr = await pickRecipe('¿Qué cocinas?');
+      if (nr) await Docs.put('plan', key, { recipeId: nr.id, versionId: nr.versions[0].id, servings });
+      return;
+    }
+    if (servings !== e.servings || versionId !== e.versionId) await Docs.put('plan', key, { ...e, servings, versionId });
+    if (choice === 'open') Router.go(`#/receta/${r.id}?v=${versionId}`);
+  }
+
+  async function weekToShopping() {
+    const plan = Docs.live(await Docs.get('plan'));
+    const monday = Dates.monday(UI.menuWeek);
+    const sum = new Map();
+    for (let i = 0; i < 7; i++) {
+      const k = Dates.key(Dates.addDays(monday, i));
+      for (const [s] of SLOTS) {
+        const e = plan[`${k}|${s}`];
+        if (!e || !byId.has(e.recipeId)) continue;
+        const id = `${e.recipeId}|${e.versionId}`;
+        sum.set(id, { ...e, servings: (sum.get(id)?.servings || 0) + e.servings });
+      }
+    }
+    const ok = await confirmSheet({ title: 'Añadir la semana a la compra', text: `Se añaden los ingredientes de ${sum.size} ${sum.size === 1 ? 'receta' : 'recetas'}, sumando las raciones de toda la semana.`, ok: 'Añadir' });
+    if (!ok) return;
+    for (const e of sum.values()) await addToShopping(e.recipeId, e.versionId, e.servings, { silent: true });
+    toast('Semana añadida a la lista', { label: 'Ver lista', run: () => Router.go('#/compra') });
+  }
+
+  const onClick = async (e) => {
+    const slot = e.target.closest('[data-slot]');
+    if (slot) { editSlot(slot.dataset.slot); return; }
+    const a = e.target.closest('[data-act]');
+    if (!a) return;
+    if (a.dataset.act === 'prev') { UI.menuWeek--; paint(); }
+    if (a.dataset.act === 'next') { UI.menuWeek++; paint(); }
+    if (a.dataset.act === 'today') { UI.menuWeek = 0; firstPaint = true; paint(); }
+    if (a.dataset.act === 'to-shop') weekToShopping();
+  };
+  await paint();
+  app.addEventListener('click', onClick);
+  const off = Docs.on((name) => { if (name === 'plan' || name === '*') paint(); });
+  return { destroy: () => { app.removeEventListener('click', onClick); off(); } };
+}
+
+/* ---------- 7.8 Lista de la compra ---------- */
+
+async function ShoppingView(app) {
+  const recipes = await Store.list();
+  const byId = new Map(recipes.map((r) => [r.id, r]));
+  await Images.preload(recipes.map((r) => r.coverImageId));
+  let showDone = false;
+
+  async function build() {
+    const [sel, manual, checks] = await Promise.all([Docs.get('shopRecipes'), Docs.get('shopManual'), Docs.get('shopChecks')]);
+    const selections = Object.entries(Docs.live(sel)).map(([key, v]) => ({ key, ...v })).filter((x) => byId.has(x.recipeId));
+    const items = Shopping.aggregate(selections, byId);
+    for (const [id, m] of Object.entries(Docs.live(manual))) {
+      items.push({ key: `m:${id}`, manualId: id, name: m.name, label: '', section: Shopping.sectionFor(m.name), from: [] });
+    }
+    const liveChecks = Docs.live(checks);
+    items.forEach((it) => { it.checked = !!liveChecks[it.key]?.checked; });
+    items.sort((a, b) => Shopping.ORDER.indexOf(a.section) - Shopping.ORDER.indexOf(b.section) || a.name.localeCompare(b.name, 'es'));
+    return { selections, items };
+  }
+
+  function itemHTML(it) {
+    return `<li class="shop-item ${it.checked ? 'is-done' : ''}" data-item="${esc(it.key)}" role="checkbox" aria-checked="${it.checked}" tabindex="0">
+      <span class="tick">${icon('check', 'ic-sm')}</span>
+      <span class="shop-name">${esc(it.name)}${it.from.length > 1 ? `<span class="shop-from">${it.from.length} recetas</span>` : ''}</span>
+      <span class="shop-qty">${esc(it.label)}</span>
+      ${it.manualId ? `<button class="icon-btn" data-del="${it.manualId}" aria-label="Quitar ${esc(it.name)}">${icon('x', 'ic-sm')}</button>` : ''}
+    </li>`;
+  }
+
+  async function paint() {
+    const { selections, items } = await build();
+    const pending = items.filter((i) => !i.checked);
+    const done = items.filter((i) => i.checked);
+    const sections = Shopping.ORDER.map((sec) => [sec, pending.filter((i) => i.section === sec)]).filter(([, l]) => l.length);
+    const y = window.scrollY;
+    const focused = document.activeElement?.id === 'add-item';
+
+    app.innerHTML = `<div class="page has-tabbar"><div class="shop">
+      <header class="home-head">
+        <div class="topbar"><p class="home-date">${pending.length ? `${pending.length} ${pending.length === 1 ? 'cosa' : 'cosas'} por comprar` : items.length ? 'Todo en el carro' : ''}</p>
+          <div style="display:flex;gap:4px">
+            ${pending.length ? `<button class="icon-btn" data-act="share" aria-label="Enviar la lista">${icon('share-2')}</button>` : ''}
+            ${items.length || selections.length ? `<button class="icon-btn" data-act="more" aria-label="Más opciones">${icon('ellipsis-vertical')}</button>` : ''}
+          </div></div>
+        <h1 class="home-title serif">Compra</h1>
+      </header>
+
+      <section class="block">
+        <div class="block-head"><h2 class="block-title serif">Recetas</h2>
+          <button class="btn add-row" data-act="add-recipe">${icon('plus', 'ic-sm')}Receta</button></div>
+        ${selections.length ? `<ul class="shop-recipes">${selections.map((s) => {
+          const r = byId.get(s.recipeId);
+          const v = r.versions.find((x) => x.id === s.versionId);
+          return `<li class="shop-recipe">${thumbHTML(r.coverImageId)}
+            <span class="shop-recipe-body"><span class="serif">${esc(r.name)}</span><span class="pick-meta">${r.versions.length > 1 && v ? esc(v.name) + '   ' : ''}${s.servings} ${s.servings === 1 ? 'ración' : 'raciones'}</span></span>
+            <div class="stepper"><button class="icon-btn" data-srv="${esc(s.key)}|-1" aria-label="Menos raciones">${icon('minus', 'ic-sm')}</button>
+              <button class="icon-btn" data-srv="${esc(s.key)}|1" aria-label="Más raciones">${icon('plus', 'ic-sm')}</button></div>
+            <button class="icon-btn" data-unsel="${esc(s.key)}" aria-label="Quitar ${esc(r.name)} de la lista">${icon('x', 'ic-sm')}</button></li>`;
+        }).join('')}</ul>` : '<p class="hint">Añade recetas aquí, desde cada receta o desde el menú de la semana.</p>'}
+      </section>
+
+      <section class="block">
+        <label class="add-item"><span class="sr-only">Añadir algo más</span>${icon('plus', 'ic-sm')}
+          <input class="input" id="add-item" placeholder="Añadir algo más: papel de cocina, café…" autocomplete="off" enterkeyhint="done"></label>
+      </section>
+
+      ${sections.map(([sec, list]) => `<section class="block shop-section"><h2 class="shop-sec">${esc(sec)}</h2><ul class="shop-list">${list.map(itemHTML).join('')}</ul></section>`).join('')}
+      ${!items.length ? `<div class="empty"><div class="placeholder">${PLATE_SVG}</div><h2 class="serif">Lista vacía</h2><p>Los ingredientes de las recetas que añadas aparecerán aquí sumados y ordenados por pasillos.</p></div>` : ''}
+
+      ${done.length ? `<section class="block shop-section">
+        <button class="shop-done-toggle" data-act="toggle-done" aria-expanded="${showDone}">${icon(showDone ? 'chevron-left' : 'chevron-right', 'ic-sm')}Ya en el carro (${done.length})</button>
+        ${showDone ? `<ul class="shop-list">${done.map(itemHTML).join('')}</ul>` : ''}</section>` : ''}
+    </div></div>
+    ${tabbarHTML('shop')}`;
+    window.scrollTo(0, y);
+    if (focused) $('#add-item', app)?.focus();
+  }
+
+  async function shareList() {
+    const { items } = await build();
+    const pending = items.filter((i) => !i.checked);
+    let text = 'Lista de la compra\n';
+    for (const sec of Shopping.ORDER) {
+      const l = pending.filter((i) => i.section === sec);
+      if (!l.length) continue;
+      text += `\n${sec}\n` + l.map((i) => `• ${i.name}${i.label ? ` (${i.label})` : ''}`).join('\n') + '\n';
+    }
+    try {
+      if (navigator.share) { await navigator.share({ text }); return; }
+    } catch (err) { if (err?.name === 'AbortError') return; }
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+  }
+
+  const onClick = async (e) => {
+    const del = e.target.closest('[data-del]');
+    if (del) { await Docs.remove('shopManual', del.dataset.del); return; }
+    const item = e.target.closest('[data-item]');
+    if (item) {
+      const on = item.getAttribute('aria-checked') !== 'true';
+      item.classList.toggle('is-done', on); item.setAttribute('aria-checked', String(on));
+      navigator.vibrate?.(8);
+      await Docs.put('shopChecks', item.dataset.item, { checked: on }, { quiet: true });
+      setTimeout(paint, 260); // un instante para ver el tic antes de que baje al carro
+      return;
+    }
+    const srv = e.target.closest('[data-srv]');
+    if (srv) {
+      const [rid, vid, d] = srv.dataset.srv.split('|');
+      const cur = Docs.live(await Docs.get('shopRecipes'))[`${rid}|${vid}`];
+      if (cur) await Docs.put('shopRecipes', `${rid}|${vid}`, { ...cur, servings: Math.max(1, Math.min(99, cur.servings + +d)) });
+      return;
+    }
+    const un = e.target.closest('[data-unsel]');
+    if (un) { await Docs.remove('shopRecipes', un.dataset.unsel); return; }
+    const a = e.target.closest('[data-act]');
+    if (!a) return;
+    switch (a.dataset.act) {
+      case 'add-recipe': {
+        const r = await pickRecipe('Añadir a la compra');
+        if (r) await addToShopping(r.id, r.versions[0].id, r.versions[0].servings || 2, { silent: true });
+        break;
+      }
+      case 'toggle-done': showDone = !showDone; paint(); break;
+      case 'share': shareList(); break;
+      case 'more': {
+        const c = await menuSheet('Opciones de la lista', [
+          { icon: 'rotate-ccw', label: 'Desmarcar todo', value: 'uncheck' },
+          { icon: 'trash-2', label: 'Vaciar la lista', value: 'clear', danger: true },
+        ]);
+        if (c === 'uncheck') await Docs.removeMany('shopChecks', Object.keys(Docs.live(await Docs.get('shopChecks'))));
+        if (c === 'clear' && await confirmSheet({ title: '¿Vaciar la lista?', text: 'Se quitan todas las recetas y cosas añadidas.', ok: 'Vaciar', danger: true })) {
+          await Docs.removeMany('shopRecipes', Object.keys(Docs.live(await Docs.get('shopRecipes'))));
+          await Docs.removeMany('shopManual', Object.keys(Docs.live(await Docs.get('shopManual'))));
+          await Docs.removeMany('shopChecks', Object.keys(Docs.live(await Docs.get('shopChecks'))));
+        }
+        break;
+      }
+    }
+  };
+  const onKey = async (e) => {
+    if (e.key === 'Enter' && e.target.id === 'add-item') {
+      const name = e.target.value.trim();
+      if (!name) return;
+      e.target.value = '';
+      await Docs.put('shopManual', uid(), { name });
+    } else if ((e.key === ' ' || e.key === 'Enter') && e.target.matches('[data-item]')) { e.preventDefault(); e.target.click(); }
+  };
+
+  await paint();
+  app.addEventListener('click', onClick);
+  app.addEventListener('keydown', onKey);
+  const off = Docs.on((name) => { if (name !== 'plan') paint(); });
+  return { destroy: () => { app.removeEventListener('click', onClick); app.removeEventListener('keydown', onKey); off(); } };
 }
 
 /* ---------- 7.5 Ajustes y copias ---------- */
@@ -1546,6 +2108,212 @@ async function pickAndEditPhoto({ square, maxSide }) {
 }
 
 /* =========================================================================
+   8b. Modo manos libres: lee los pasos en voz alta y obedece a la voz
+   ========================================================================= */
+
+const Voice = (() => {
+  const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null, active = false, speaking = false, handlers = null, onState = null;
+
+  const supported = { speak: 'speechSynthesis' in window, listen: !!Rec };
+
+  function pickVoice() {
+    const voices = speechSynthesis.getVoices();
+    return voices.find((v) => v.lang === 'es-ES') || voices.find((v) => v.lang?.startsWith('es')) || null;
+  }
+
+  function speak(text) {
+    if (!supported.speak || !active) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'es-ES';
+    const v = pickVoice(); if (v) u.voice = v;
+    u.rate = 0.98;
+    speaking = true;
+    stopListening(); // que no se escuche a sí misma
+    u.onend = u.onerror = () => { speaking = false; startListening(); };
+    speechSynthesis.speak(u);
+  }
+
+  const COMMANDS = [
+    [/\b(siguiente|sigue|adelante|vale|hecho|listo)\b/, 'next'],
+    [/\b(anterior|atras|vuelve)\b/, 'prev'],
+    [/\b(repite|otra vez|repetir)\b/, 'repeat'],
+    [/\b(temporizador|empieza|inicia|arranca|cronometro)\b/, 'timer'],
+    [/\b(para|pausa|detente|stop)\b/, 'pause'],
+    [/\b(ingredientes)\b/, 'ingredients'],
+  ];
+
+  function startListening() {
+    if (!active || !Rec || speaking || rec) return;
+    rec = new Rec();
+    rec.lang = 'es-ES';
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.onresult = (e) => {
+      const said = norm(e.results[e.results.length - 1][0].transcript);
+      const hit = COMMANDS.find(([re]) => re.test(said));
+      if (hit) handlers?.[hit[1]]?.();
+    };
+    rec.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        toast('Sin permiso para el micrófono: solo leeré los pasos en voz alta.');
+        supported.listen = false;
+        onState?.('denied');
+      }
+    };
+    rec.onend = () => { rec = null; if (active && !speaking && supported.listen) setTimeout(startListening, 250); };
+    try { rec.start(); onState?.('listening'); } catch { rec = null; }
+  }
+
+  function stopListening() { const r = rec; rec = null; try { r?.abort(); } catch { /* */ } }
+
+  return {
+    supported,
+    get active() { return active; },
+    start(h, stateCb) { active = true; handlers = h; onState = stateCb; startListening(); },
+    stop() { active = false; handlers = null; stopListening(); if (supported.speak) speechSynthesis.cancel(); onState?.('off'); },
+    speak,
+  };
+})();
+
+/* =========================================================================
+   8c. Tarjeta para compartir (imagen cuadrada 1080 × 1080)
+   ========================================================================= */
+
+const Card = (() => {
+  const S = 1080;
+  const C = { bg: '#000000', text: '#EDE8E0', text2: '#A8A097', accent: '#E8A33D', line: '#2A2622' };
+
+  function wrap(ctx, text, maxW) {
+    const words = text.split(/\s+/); const lines = []; let line = '';
+    for (const w of words) {
+      const t = line ? line + ' ' + w : w;
+      if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t;
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  /** Dibuja la foto con los bordes fundidos a negro, igual que en la app. */
+  function drawFloating(ctx, img, x, y, size) {
+    const off = document.createElement('canvas'); off.width = off.height = size;
+    const o = off.getContext('2d');
+    const side = Math.min(img.width, img.height);
+    o.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+    o.globalCompositeOperation = 'destination-in';
+    const f = 0.11;
+    let g = o.createLinearGradient(0, 0, size, 0);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(f, '#000'); g.addColorStop(1 - f, '#000'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    o.fillStyle = g; o.fillRect(0, 0, size, size);
+    g = o.createLinearGradient(0, 0, 0, size);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(f, '#000'); g.addColorStop(1 - f, '#000'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    o.fillStyle = g; o.fillRect(0, 0, size, size);
+    ctx.drawImage(off, x, y);
+  }
+
+  function drawPlate(ctx, cx, cy, r) {
+    ctx.strokeStyle = C.line; ctx.lineWidth = 3;
+    [1, 0.7].forEach((k) => { ctx.beginPath(); ctx.arc(cx, cy, r * k, 0, Math.PI * 2); ctx.stroke(); });
+  }
+
+  async function render(recipe, version, servings) {
+    await Promise.all([document.fonts.load('400 80px Fraunces'), document.fonts.load('400 30px Fraunces')]).catch(() => {});
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = S;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, S, S);
+
+    // Foto flotando a la izquierda
+    const photo = 600, px = -30, py = (S - photo) / 2 - 20;
+    const src = Images.cached(recipe.coverImageId);
+    if (src) {
+      const img = new Image(); img.src = src;
+      await img.decode().catch(() => {});
+      if (img.width) drawFloating(ctx, img, px, py, photo);
+    } else drawPlate(ctx, px + photo / 2, py + photo / 2, photo * 0.36);
+
+    // Texto a la derecha
+    const x = 580, maxW = S - x - 70;
+    let y = 150;
+    ctx.fillStyle = C.accent; ctx.font = '500 26px system-ui, Roboto, sans-serif';
+    ctx.fillText(recipe.category || 'Receta', x, y);
+    y += 30;
+    ctx.fillStyle = C.text; ctx.font = '400 62px Fraunces, Georgia, serif';
+    const title = wrap(ctx, recipe.name, maxW).slice(0, 3);
+    title.forEach((l) => { y += 70; ctx.fillText(l, x, y); });
+
+    y += 58;
+    ctx.fillStyle = C.text2; ctx.font = '400 26px system-ui, Roboto, sans-serif';
+    const meta = [formatMinutes(version.minutes), `${servings} ${servings === 1 ? 'ración' : 'raciones'}`, recipe.versions.length > 1 ? version.name : ''].filter(Boolean).join('     ');
+    ctx.fillText(meta, x, y);
+
+    y += 38; ctx.strokeStyle = C.line; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(S - 70, y); ctx.stroke();
+
+    // Ingredientes
+    const factor = servings / (version.servings || 1);
+    const ings = version.ingredients.filter((i) => i.name.trim());
+    const room = Math.floor((S - 110 - (y + 20)) / 44);
+    const shown = ings.length > room ? ings.slice(0, room - 1) : ings;
+    y += 20;
+    ctx.font = '400 27px system-ui, Roboto, sans-serif';
+    const qtys = shown.map((i) => qtyLabel(i.qty == null ? null : (NO_SCALE_UNITS.has(i.unit) ? i.qty : i.qty * factor), i.unit));
+    // Todas las cantidades en una columna y los nombres alineados a su derecha
+    const nameX = x + Math.min(220, Math.max(110, ...qtys.map((q) => ctx.measureText(q).width)) + 22);
+    for (const [n, i] of shown.entries()) {
+      y += 44;
+      ctx.fillStyle = C.accent; ctx.fillText(qtys[n], x, y);
+      ctx.fillStyle = C.text;
+      const name = wrap(ctx, i.name, S - 70 - nameX)[0];
+      ctx.fillText(name, nameX, y);
+    }
+    if (shown.length < ings.length) { y += 44; ctx.fillStyle = C.text2; ctx.fillText(`y ${ings.length - shown.length} ingredientes más`, x, y); }
+
+    // Firma
+    ctx.fillStyle = '#5E5850'; ctx.font = '400 24px Fraunces, Georgia, serif';
+    ctx.fillText('Recetario', x, S - 70);
+
+    return new Promise((res) => canvas.toBlob(res, 'image/png'));
+  }
+
+  async function share(recipe, version, servings) {
+    const blob = await render(recipe, version, servings);
+    const name = `${norm(recipe.name).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'receta'}.png`;
+    const file = new File([blob], name, { type: 'image/png' });
+    return { blob, file };
+  }
+
+  return { render, share };
+})();
+
+/** Muestra la tarjeta y deja compartirla o guardarla. */
+async function shareCardFlow(recipe, version, servings) {
+  const { blob, file } = await Card.share(recipe, version, servings);
+  const url = URL.createObjectURL(blob);
+  await Sheets.open((el, close) => {
+    const canShare = navigator.canShare?.({ files: [file] });
+    el.innerHTML = `<h2 class="serif">Tarjeta de la receta</h2>
+      <img class="card-preview" src="${url}" alt="Tarjeta de ${esc(recipe.name)}">
+      <div class="actions">
+        <button class="btn btn-ghost" data-c="save">${icon('download', 'ic-sm')}Guardar imagen</button>
+        ${canShare ? `<button class="btn btn-primary" data-c="share">${icon('share-2', 'ic-sm')}Compartir</button>` : ''}
+      </div>`;
+    el.addEventListener('click', async (e) => {
+      const c = e.target.closest('[data-c]');
+      if (!c) return;
+      if (c.dataset.c === 'share') {
+        try { await navigator.share({ files: [file], title: recipe.name }); close(); }
+        catch (err) { if (err?.name !== 'AbortError') toast('No se pudo compartir. Prueba con “Guardar imagen”.'); }
+      } else {
+        const a = document.createElement('a'); a.href = url; a.download = file.name;
+        document.body.append(a); a.click(); a.remove();
+        toast('Imagen guardada en Descargas');
+      }
+    });
+  }, { label: 'Tarjeta de la receta' });
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+/* =========================================================================
    9. Copias: exportar e importar (.zip con datos + fotos)
    ========================================================================= */
 
@@ -1631,7 +2399,7 @@ const Backup = {
       files[`fotos/${id}`] = [new Uint8Array(await rec.blob.arrayBuffer()), { level: 0 }]; // ya van comprimidas
       imageTypes[id] = rec.blob.type;
     }
-    const data = { format: Backup.FORMAT, formatVersion: 1, appVersion: APP_VERSION, exportedAt: Date.now(), recipes, tombstones, imageTypes };
+    const data = { format: Backup.FORMAT, formatVersion: 1, appVersion: APP_VERSION, exportedAt: Date.now(), recipes, tombstones, imageTypes, docs: await Docs.all() };
     files['recetario.json'] = strToU8(JSON.stringify(data));
     const zipped = zipSync(files);
     const stamp = new Date().toISOString().slice(0, 10);
@@ -1675,6 +2443,7 @@ const Backup = {
       const bytes = entries[`fotos/${id}`];
       return bytes ? new Blob([bytes], { type: data.imageTypes?.[id] || 'image/webp' }) : null;
     });
+    await Docs.merge(data.docs);
     Sync.schedule();
     return result;
   },
@@ -1827,6 +2596,7 @@ const Sync = (() => {
         return f ? (await api(token, `${FILES}/${f.id}?alt=media`)).blob() : null;
       };
       const result = await mergeRemote(remote, download);
+      if (await Docs.merge(remote.docs)) result.docsChanged = true;
 
       // 3. Fotos que faltan aquí aunque la receta ya estuviera (p. ej. subida a medias)
       const [recipes, tombstones, localIds] = await Promise.all([DB.all('recipes'), DB.all('tombstones'), DB.keys('images')]);
@@ -1848,7 +2618,7 @@ const Sync = (() => {
 
       // 5. Subir el índice de recetas si ha cambiado
       const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-      const indexText = canonical({ format: 'recetario', formatVersion: 1, recipes: [...recipes].sort(byId), tombstones: [...tombstones].sort(byId) });
+      const indexText = canonical({ format: 'recetario', formatVersion: 1, recipes: [...recipes].sort(byId), tombstones: [...tombstones].sort(byId), docs: await Docs.all() });
       if (indexText !== remoteText) {
         await upload(token, { id: indexFile?.id, name: INDEX_NAME, blob: new Blob([indexText], { type: 'application/json' }) });
       }
@@ -1892,7 +2662,7 @@ const Sync = (() => {
   function refreshView() {
     const h = location.hash || '#/';
     if (Sheets.isOpen()) return;
-    if (/^#\/?$|^#\/receta\/|^#\/ajustes/.test(h)) Router.render();
+    if (/^#\/?$|^#\/receta\/|^#\/ajustes|^#\/menu|^#\/compra/.test(h)) Router.render();
   }
 
   /** Tras guardar o borrar: sincroniza en unos segundos si hay permiso; si no, queda pendiente. */
@@ -1975,6 +2745,8 @@ Router.add(/^\/receta\/([^/]+)$/, RecipeView);
 Router.add(/^\/editar\/([^/]+)$/, EditorView);
 Router.add(/^\/cocinar\/([^/]+)$/, CookView);
 Router.add(/^\/ajustes$/, SettingsView);
+Router.add(/^\/menu$/, MenuView);
+Router.add(/^\/compra$/, ShoppingView);
 
 (async function start() {
   if (!('indexedDB' in window)) { $('#app').innerHTML = '<p style="padding:24px">Este navegador no puede guardar recetas. Usa Chrome actualizado.</p>'; return; }
