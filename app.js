@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 
 /* =========================================================================
    1. Utilidades
@@ -354,7 +354,7 @@ const Store = {
    ========================================================================= */
 
 const Docs = (() => {
-  const NAMES = ['plan', 'shopRecipes', 'shopManual', 'shopChecks'];
+  const NAMES = ['plan', 'shopRecipes', 'shopManual', 'shopChecks', 'categories'];
   const listeners = new Set();
 
   const get = async (name) => (await Meta.get(`doc:${name}`)) || {};
@@ -405,6 +405,47 @@ const Docs = (() => {
 
   return { get, live, put, remove, removeMany, merge, all, on(fn) { listeners.add(fn); return () => listeners.delete(fn); } };
 })();
+
+/* ---------- Categorías ----------
+   Se guardan con clave = nombre normalizado, así "Postres" creada en el móvil y en
+   la tablet es la misma. Las de serie se escriben con fecha 0: cualquier cambio
+   tuyo (borrarla, renombrarla) siempre gana al sincronizar. */
+
+const Categories = {
+  async ensureDefaults() {
+    if (await Meta.get('categoriesSeeded')) return;
+    const map = await Docs.get('categories');
+    for (const name of CATEGORY_SUGGESTIONS) { const k = norm(name); if (!map[k]) map[k] = { name, updatedAt: 0 }; }
+    await Meta.set('doc:categories', map);
+    await Meta.set('categoriesSeeded', true);
+  },
+  /** Todas las categorías: las guardadas más las que ya usan tus recetas. */
+  async list(recipes) {
+    await Categories.ensureDefaults();
+    const live = Docs.live(await Docs.get('categories'));
+    const names = new Map(Object.values(live).map((c) => [norm(c.name), c.name]));
+    for (const r of recipes || []) if (r.category && !names.has(norm(r.category))) names.set(norm(r.category), r.category);
+    return [...names.values()].sort((a, b) => a.localeCompare(b, 'es'));
+  },
+  async add(name) {
+    const clean = name.trim().replace(/\s+/g, ' ');
+    if (!clean) return null;
+    const pretty = clean.charAt(0).toUpperCase() + clean.slice(1);
+    await Docs.put('categories', norm(pretty), { name: pretty });
+    return pretty;
+  },
+  async rename(oldName, newName) {
+    const pretty = await Categories.add(newName);
+    if (!pretty || norm(pretty) === norm(oldName)) return pretty;
+    await Docs.remove('categories', norm(oldName));
+    for (const r of await Store.list()) if (norm(r.category) === norm(oldName)) { r.category = pretty; await Store.save(r); }
+    return pretty;
+  },
+  async remove(name) {
+    await Docs.remove('categories', norm(name));
+    for (const r of await Store.list()) if (norm(r.category) === norm(name)) { r.category = ''; await Store.save(r); }
+  },
+};
 
 /* ---------- Lista de la compra: suma y agrupación de ingredientes ---------- */
 
@@ -694,8 +735,12 @@ async function HomeView(app) {
           <button class="icon-btn" data-go="#/ajustes" aria-label="Ajustes y sincronización">${icon('settings-2')}</button>
         </div>
       </div>
-      <h1 class="home-title serif">Recetario</h1>
+      <h1 class="home-title serif">Recetario del chef JJ</h1>
     </header>
+    <section class="chef-hero" aria-label="Cocinando fit con JJ">
+      <img src="chef.webp" alt="El chef JJ con su chaqueta blanca, sonriendo y de brazos cruzados" width="1000" height="1140" decoding="async">
+      <p class="chef-tagline serif">Cocinando fit con JJ</p>
+    </section>
     ${banner}
     ${recipes.length ? `
       <div class="home-tools">
@@ -748,10 +793,9 @@ async function HomeView(app) {
 }
 
 function emptyHome() {
-  return `<div class="empty">
-    <div class="placeholder">${PLATE_SVG}</div>
+  return `<div class="empty" style="padding-top:12px">
     <h2 class="serif">Tu primera receta</h2>
-    <p>Añade la foto del plato, los ingredientes y los pasos. Todo se guarda en este dispositivo.</p>
+    <p>Pulsa «Nueva receta» y añade la foto del plato, los ingredientes y los pasos.</p>
   </div>`;
 }
 
@@ -771,16 +815,6 @@ function homeResults(recipes) {
     return `<p class="muted-empty" style="margin-top:28px">${q ? `No hay recetas con “${esc(q)}”.` : 'No hay recetas en este filtro.'}</p>`;
   }
 
-  // Destacada: la última que cocinaste (o la más reciente), solo sin filtros y con 3 o más recetas
-  let feature = null;
-  if (!q && UI.homeFilter === 'all' && list.length >= 3) {
-    // Solo se destaca una receta con foto: el plato es el protagonista
-    const withPhoto = list.filter((r) => r.coverImageId && Images.cached(r.coverImageId));
-    const cooked = withPhoto.filter((r) => r.lastCookedAt).sort((a, b) => b.lastCookedAt - a.lastCookedAt);
-    feature = cooked[0] || withPhoto[0] || null;
-    if (feature) list = list.filter((r) => r !== feature);
-  }
-
   const card = (r) => {
     const v = r.versions[0];
     const hero = r.id === UI.lastRecipeId;
@@ -795,23 +829,7 @@ function homeResults(recipes) {
     </button>`;
   };
 
-  let out = '';
-  if (feature) {
-    const v = feature.versions[0];
-    const hero = feature.id === UI.lastRecipeId;
-    out += `<button class="feature" data-go="#/receta/${feature.id}" ${hero ? 'data-hero="1"' : ''}>
-      ${photoHTML(feature.coverImageId, { alt: feature.name, hero })}
-      <p class="feature-kicker">${feature.lastCookedAt ? 'La última que cocinaste' : 'La más reciente'}</p>
-      <h2 class="feature-name serif">${esc(feature.name || 'Sin nombre')}</h2>
-      <div class="feature-meta meta">
-        ${v.minutes ? `<span>${icon('clock', 'ic-sm')}${formatMinutes(v.minutes)}</span>` : ''}
-        ${feature.category ? `<span>${esc(feature.category)}</span>` : ''}
-      </div>
-    </button>
-    <h2 class="section-title serif">Todas tus recetas</h2>`;
-  } else {
-    out += `<div style="height:14px"></div>`;
-  }
+  let out = !q && UI.homeFilter === 'all' ? `<h2 class="section-title serif">Todas las recetas</h2>` : '<div style="height:14px"></div>';
   out += `<div class="grid">${list.map(card).join('')}</div>`;
   return out;
 }
@@ -1103,11 +1121,20 @@ async function EditorView(app, id, params) {
   let dirty = false;
   let saved = false;
   const markDirty = () => { dirty = true; };
-  const allById = new Map((await Store.list()).filter((r) => r.id !== draft.id).map((r) => [r.id, r]));
+  const allRecipes = await Store.list();
+  const allById = new Map(allRecipes.filter((r) => r.id !== draft.id).map((r) => [r.id, r]));
+  const categories = await Categories.list(allRecipes);
+  if (draft.category && !categories.some((c) => norm(c) === norm(draft.category))) categories.push(draft.category);
 
   await Images.preload([draft.coverImageId, ...[...version.prep, ...version.cook].map((s) => s.imageId)]);
 
   const title = isNew ? 'Nueva receta' : isNewVersion ? 'Nueva versión' : 'Editar receta';
+
+  function categoryChips() {
+    const off = isNewVersion ? 'disabled' : '';
+    return categories.map((c) => `<button type="button" class="chip ${norm(c) === norm(draft.category) ? 'is-on' : ''}" data-cat="${esc(c)}" aria-pressed="${norm(c) === norm(draft.category)}" ${off}>${esc(c)}</button>`).join('')
+      + `<button type="button" class="chip chip-add" data-act="new-cat" ${off}>${icon('plus', 'ic-sm')}Nueva</button>`;
+  }
 
   function unitOptions(sel) {
     return UNITS.map((u) => `<option value="${esc(u.v)}" ${u.v === sel ? 'selected' : ''}>${esc(u.l)}</option>`).join('');
@@ -1173,9 +1200,8 @@ async function EditorView(app, id, params) {
       <div class="editor-group">
         <label class="field"><span class="label">Nombre del plato</span>
           <input class="input" data-r="name" value="${esc(draft.name)}" placeholder="Paella de marisco" maxlength="80" ${isNewVersion ? 'disabled' : ''}></label>
-        <label class="field"><span class="label">Categoría</span>
-          <input class="input" data-r="category" list="cats" value="${esc(draft.category)}" placeholder="Arroces" maxlength="30" ${isNewVersion ? 'disabled' : ''}>
-          <datalist id="cats">${CATEGORY_SUGGESTIONS.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label>
+        <div class="field"><span class="label">Categoría</span>
+          <div class="cat-picker" id="cat-picker" role="group" aria-label="Categoría">${categoryChips()}</div></div>
       </div>
 
       <div class="editor-group">
@@ -1243,6 +1269,14 @@ async function EditorView(app, id, params) {
   };
 
   const onClick = async (e) => {
+    const cat = e.target.closest('[data-cat]');
+    if (cat) {
+      e.preventDefault();
+      draft.category = norm(draft.category) === norm(cat.dataset.cat) ? '' : cat.dataset.cat; // tocar otra vez la quita
+      markDirty();
+      $('#cat-picker', app).innerHTML = categoryChips();
+      return;
+    }
     const fr = e.target.closest('[data-frac]');
     if (fr) {
       e.preventDefault();
@@ -1269,6 +1303,15 @@ async function EditorView(app, id, params) {
         version.ingredients.push(ing); markDirty();
         $('#ing-list', app).insertAdjacentHTML('beforeend', ingRow(ing));
         $(`[data-ing="${ing.id}"] [data-f="qty"]`, app).focus();
+        break;
+      }
+      case 'new-cat': {
+        const name = await promptSheet({ title: 'Nueva categoría', label: 'Nombre', placeholder: 'Desayunos, Batch cooking, Sin gluten…', ok: 'Crear' });
+        if (!name) return;
+        const pretty = await Categories.add(name);
+        if (!categories.some((c) => norm(c) === norm(pretty))) { categories.push(pretty); categories.sort((a, b) => a.localeCompare(b, 'es')); }
+        draft.category = pretty; markDirty();
+        $('#cat-picker', app).innerHTML = categoryChips();
         break;
       }
       case 'link-ing': {
@@ -2006,6 +2049,7 @@ async function SettingsView(app) {
     navigator.storage?.estimate?.().catch(() => null), navigator.storage?.persisted?.().catch(() => null),
     Meta.get('driveConnected'), Meta.get('lastSync'),
   ]);
+  const cats = await Categories.list(recipes);
   const used = est?.usage || 0, quota = est?.quota || 0;
   const pct = quota ? Math.max(1, Math.round((used / quota) * 100)) : 0;
   let canShare = false;
@@ -2030,6 +2074,18 @@ async function SettingsView(app) {
         <p>Conecta tu cuenta de Google para que las recetas pasen solas entre el móvil y la tablet. Se guardan en una carpeta privada de tu Drive que solo ve esta app; tus otros archivos no se tocan.</p>
         <p class="hint">Usa la misma cuenta de Google en todos tus dispositivos.</p>
         <div class="actions"><button class="btn btn-primary" data-act="connect">${icon('cloud', 'ic-sm')}Conectar con Google Drive</button></div>`}
+    </section>
+
+    <section class="panel">
+      <h2 class="serif">Categorías</h2>
+      <p>Crea las tuyas, cámbiales el nombre o bórralas. Al renombrar, las recetas se actualizan solas.</p>
+      <ul class="cat-list">${cats.map((c) => {
+        const n = recipes.filter((r) => norm(r.category) === norm(c)).length;
+        return `<li><span>${esc(c)}<span class="hint"> ${n ? `${n} ${n === 1 ? 'receta' : 'recetas'}` : ''}</span></span>
+          <button class="icon-btn" data-cat-edit="${esc(c)}" aria-label="Renombrar ${esc(c)}">${icon('pencil', 'ic-sm')}</button>
+          <button class="icon-btn" data-cat-del="${esc(c)}" aria-label="Borrar ${esc(c)}">${icon('trash-2', 'ic-sm')}</button></li>`;
+      }).join('')}</ul>
+      <div class="actions"><button class="btn add-row" data-act="cat-add">${icon('plus', 'ic-sm')}Nueva categoría</button></div>
     </section>
 
     <section class="panel">
@@ -2063,9 +2119,29 @@ async function SettingsView(app) {
   </div></div>`;
 
   const onClick = async (e) => {
+    const ce = e.target.closest('[data-cat-edit]');
+    if (ce) {
+      const old = ce.dataset.catEdit;
+      const name = await promptSheet({ title: 'Renombrar categoría', label: 'Nuevo nombre', value: old, ok: 'Guardar' });
+      if (name && name.trim() !== old) { await Categories.rename(old, name); toast('Categoría renombrada'); Router.render(); }
+      return;
+    }
+    const cd = e.target.closest('[data-cat-del]');
+    if (cd) {
+      const name = cd.dataset.catDel;
+      const n = recipes.filter((r) => norm(r.category) === norm(name)).length;
+      const ok = await confirmSheet({ title: `¿Borrar “${name}”?`, text: n ? `${n === 1 ? 'La receta que la usa se queda' : `Las ${n} recetas que la usan se quedan`} sin categoría. No se borra ninguna receta.` : 'No la usa ninguna receta.', ok: 'Borrar', danger: true });
+      if (ok) { await Categories.remove(name); toast('Categoría borrada'); Router.render(); }
+      return;
+    }
     const a = e.target.closest('[data-act]');
     if (!a) return;
     if (a.dataset.act === 'back') { Router.back('#/'); return; }
+    if (a.dataset.act === 'cat-add') {
+      const name = await promptSheet({ title: 'Nueva categoría', label: 'Nombre', placeholder: 'Desayunos, Batch cooking, Sin gluten…', ok: 'Crear' });
+      if (name) { await Categories.add(name); Router.render(); }
+      return;
+    }
     if (a.dataset.act === 'connect' || a.dataset.act === 'sync-now') {
       a.disabled = true;
       try {

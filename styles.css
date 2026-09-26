@@ -214,7 +214,7 @@ button { cursor: pointer; }
 
 .home-head { padding-top: 10px; }
 .home-date { margin: 0; font-size: 13px; color: var(--text-3); }
-.home-title { margin: 2px 0 0; font-size: clamp(40px, 11vw, 64px); line-height: 1; }
+.home-title { margin: 2px 0 0; font-size: clamp(36px, 10vw, 60px); line-height: 1.02; text-wrap: balance; }
 
 .home-tools { display: grid; gap: 14px; margin: 22px 0 8px; }
 
@@ -674,4 +674,32 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
   display: inline-flex; align-items: center; gap: 6px; align-self: center;
   min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid #5b4420;
   background: transparent; color: var(--accent); font-size: 13px;
+}
+
+/* ---------- Portada: el chef ---------- */
+.chef-hero { position: relative; width: min(100%, 560px); margin: 8px auto 0; }
+.chef-hero img {
+  width: 100%; height: auto; max-height: 72dvh; object-fit: cover; object-position: top center;
+  /* Difuminado a negro por abajo (y un poco por los lados) para que no haya corte */
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 52%, transparent 94%), linear-gradient(to right, transparent 0, #000 8%, #000 92%, transparent 100%);
+  -webkit-mask-composite: source-in;
+          mask-image: linear-gradient(to bottom, #000 0, #000 52%, transparent 94%), linear-gradient(to right, transparent 0, #000 8%, #000 92%, transparent 100%);
+          mask-composite: intersect;
+}
+.chef-tagline {
+  position: absolute; left: 0; right: 0; bottom: 5%; margin: 0; text-align: center;
+  font-size: clamp(30px, 8.5vw, 46px); line-height: 1.1; color: var(--text);
+  font-style: italic; letter-spacing: -0.01em;
+}
+.chef-tagline::before { content: ""; display: block; width: 40px; height: 2px; margin: 0 auto 14px; background: var(--accent); border-radius: 1px; }
+
+/* ---------- Categorías ---------- */
+.cat-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.cat-list { list-style: none; margin: 0; padding: 0; }
+.cat-list li { display: flex; align-items: center; gap: 4px; min-height: 52px; border-bottom: 1px solid var(--s2); }
+.cat-list li > span { flex: 1; }
+.cat-list .icon-btn { width: 44px; height: 44px; color: var(--text-3); }
+@media (orientation: landscape) and (min-width: 700px) {
+  .chef-hero { width: min(100%, 520px); }
+  .chef-hero img { max-height: 58dvh; }
 }
