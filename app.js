@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 
 /* =========================================================================
    1. Utilidades
@@ -87,6 +87,15 @@ function formatQty(n, unit) {
     for (const [v, sym] of FRACTIONS) if (Math.abs(frac - v) < 0.03) return (whole || '') + sym;
   }
   return nf.format(Math.round(n * 100) / 100);
+}
+
+/** Cantidad para el campo de edición: fracciones de cocina si encajan (¼, 1½…), si no decimales. */
+function editQty(n) {
+  if (n == null) return '';
+  const whole = Math.floor(n + 1e-9), frac = n - whole;
+  if (frac < 0.005) return String(whole);
+  for (const [v, sym] of FRACTIONS) if (Math.abs(frac - v) < 0.005) return (whole || '') + sym;
+  return nf.format(n);
 }
 
 function formatMinutes(min) {
@@ -447,13 +456,23 @@ const Shopping = (() => {
    */
   function aggregate(selections, recipesById) {
     const acc = new Map();
-    for (const sel of selections) {
+    // Una receta vinculada (la salsa de la hamburguesa) no se compra: se compran sus ingredientes.
+    // Se cuenta una tanda de la salsa por cada tanda de la receta principal.
+    const queue = selections.map((s) => ({ ...s, depth: 0 }));
+    while (queue.length) {
+      const sel = queue.shift();
       const r = recipesById.get(sel.recipeId);
       if (!r) continue;
       const v = r.versions.find((x) => x.id === sel.versionId) || r.versions[0];
       const factor = (sel.servings || v.servings || 1) / (v.servings || 1);
       for (const i of v.ingredients) {
         if (!i.name.trim()) continue;
+        const sub = i.recipeId && recipesById.get(i.recipeId);
+        if (sub && sel.depth < 3) {
+          const sv = sub.versions[0];
+          queue.push({ recipeId: sub.id, versionId: sv.id, servings: (sv.servings || 1) * factor, depth: sel.depth + 1, via: r.name });
+          continue;
+        }
         const [baseUnit, mult] = BASE[i.unit] || [i.unit, 1];
         const key = `${norm(i.name)}|${baseUnit}`;
         const cur = acc.get(key) || { key, name: i.name.trim(), unit: baseUnit, qty: null, from: new Set() };
@@ -820,12 +839,17 @@ async function RecipeView(app, id, params) {
   const recipe = await Store.get(id);
   if (!recipe) { toast('Esa receta ya no existe'); Router.go('#/'); return; }
   UI.lastRecipeId = id;
+  const all = await Store.list();
+  const allById = new Map(all.map((r) => [r.id, r]));
+  // Recetas que usan esta como ingrediente (p. ej. la hamburguesa que lleva esta salsa)
+  const usedIn = all.filter((r) => r.id !== id && r.versions.some((v) => v.ingredients.some((i) => i.recipeId === id)));
+  const linkedOf = (v) => [...new Map(v.ingredients.filter((i) => i.recipeId && allById.has(i.recipeId)).map((i) => [i.recipeId, allById.get(i.recipeId)])).values()];
 
   let version = recipe.versions.find((v) => v.id === params.v) || recipe.versions[0];
   let servings = version.servings || 1;
   let tab = version.prep.length ? 'prep' : 'cook';
 
-  await Images.preload([recipe.coverImageId, ...recipe.versions.flatMap((v) => [...v.prep, ...v.cook].map((s) => s.imageId))]);
+  await Images.preload([recipe.coverImageId, ...recipe.versions.flatMap((v) => [...v.prep, ...v.cook].map((s) => s.imageId)), ...all.map((r) => r.coverImageId)]);
 
   function ingredientsHTML() {
     if (!version.ingredients.length) return `<p class="muted-empty">Esta versión no tiene ingredientes.</p>`;
@@ -835,8 +859,10 @@ async function RecipeView(app, id, params) {
       const q = i.qty == null ? null : (NO_SCALE_UNITS.has(i.unit) ? i.qty : i.qty * factor);
       const qty = qtyLabel(q, i.unit);
       const done = checks.has(i.id);
-      return `<li class="ing ${done ? 'is-done' : ''}" data-check="${i.id}" role="checkbox" aria-checked="${done}" tabindex="0">
-        <span class="tick">${icon('check', 'ic-sm')}</span><span class="qty">${esc(qty)}</span><span class="name">${esc(i.name)}</span></li>`;
+      const sub = i.recipeId && allById.get(i.recipeId);
+      return `<li class="ing ${done ? 'is-done' : ''} ${sub ? 'has-link' : ''}" data-check="${i.id}" role="checkbox" aria-checked="${done}" tabindex="0">
+        <span class="tick">${icon('check', 'ic-sm')}</span><span class="qty">${esc(qty)}</span><span class="name">${esc(i.name)}</span>
+        ${sub ? `<button class="ing-open" data-open="${sub.id}" aria-label="Ver la receta de ${esc(sub.name)}">${icon('book-open', 'ic-sm')}Receta</button>` : ''}</li>`;
     }).join('')}</ul>`;
   }
 
@@ -903,6 +929,8 @@ async function RecipeView(app, id, params) {
             </div>
             <div id="steps" role="tabpanel">${stepsHTML()}</div>
           </section>
+          ${usedIn.length ? `<section class="block"><h2 class="block-title serif" style="margin-bottom:10px">Se usa en</h2>
+            <div class="chips">${usedIn.map((r) => `<button class="chip" data-open="${r.id}">${icon('book-open', 'ic-sm')}${esc(r.name)}</button>`).join('')}</div></section>` : ''}
           ${version.notes ? `<section class="block"><h2 class="block-title serif" style="margin-bottom:10px">Notas</h2><p class="notes">${esc(version.notes)}</p></section>` : ''}
         </div>
       </div>
@@ -919,6 +947,8 @@ async function RecipeView(app, id, params) {
   };
 
   const onClick = async (e) => {
+    const open = e.target.closest('[data-open]');
+    if (open) { e.stopPropagation(); Router.go(`#/receta/${open.dataset.open}`); return; }
     const check = e.target.closest('[data-check]');
     if (check) { toggleCheck(check); return; }
     const vb = e.target.closest('[data-version]');
@@ -940,7 +970,28 @@ async function RecipeView(app, id, params) {
         $('.stepper output', app).textContent = `${servings} ${servings === 1 ? 'ración' : 'raciones'}`;
         $('#ings', app).innerHTML = ingredientsHTML();
         break;
-      case 'cook': Router.go(`#/cocinar/${recipe.id}?v=${version.id}&r=${servings}`); break;
+      case 'cook': {
+        const subs = linkedOf(version);
+        if (subs.length) {
+          // Antes de empezar: las elaboraciones vinculadas (salsas, masas…) suelen hacerse primero
+          const go = await Sheets.open((el, close) => {
+            el.innerHTML = `<h2 class="serif">Antes de empezar</h2>
+              <p>Esta receta lleva ${subs.length === 1 ? 'otra receta' : 'otras recetas'} que conviene tener lista${subs.length === 1 ? '' : 's'}:</p>
+              <div class="pick-list">${subs.map((r) => `<button class="pick-row" data-sub="${r.id}">${thumbHTML(r.coverImageId)}
+                <span><span class="pick-name serif">${esc(r.name)}</span><span class="pick-meta">Ver receta y cocinarla</span></span></button>`).join('')}</div>
+              <div class="actions"><button class="btn btn-primary" data-c="main">${icon('chef-hat', 'ic-sm')}Ya la tengo: empezar</button></div>`;
+            el.addEventListener('click', (ev) => {
+              const sb = ev.target.closest('[data-sub]'); if (sb) close({ sub: sb.dataset.sub });
+              const c = ev.target.closest('[data-c]'); if (c) close({ main: true });
+            });
+          }, { label: 'Antes de empezar' });
+          if (go?.sub) Router.go(`#/receta/${go.sub}`);
+          if (go?.main) Router.go(`#/cocinar/${recipe.id}?v=${version.id}&r=${servings}`);
+          break;
+        }
+        Router.go(`#/cocinar/${recipe.id}?v=${version.id}&r=${servings}`);
+        break;
+      }
       case 'new-version': newVersionFlow(recipe, version); break;
       case 'to-shop': addToShopping(recipe.id, version.id, servings); break;
       case 'card':
@@ -1052,6 +1103,7 @@ async function EditorView(app, id, params) {
   let dirty = false;
   let saved = false;
   const markDirty = () => { dirty = true; };
+  const allById = new Map((await Store.list()).filter((r) => r.id !== draft.id).map((r) => [r.id, r]));
 
   await Images.preload([draft.coverImageId, ...[...version.prep, ...version.cook].map((s) => s.imageId)]);
 
@@ -1062,11 +1114,16 @@ async function EditorView(app, id, params) {
   }
 
   function ingRow(i) {
+    const linked = i.recipeId && allById.get(i.recipeId);
     return `<div class="ing-row" data-ing="${i.id}">
-      <input class="input" data-f="qty" inputmode="decimal" placeholder="Cant." value="${esc(i.qty == null ? '' : nf.format(i.qty))}" aria-label="Cantidad">
+      <input class="input" data-f="qty" inputmode="decimal" placeholder="Cant." value="${esc(editQty(i.qty))}" aria-label="Cantidad">
       <select class="select" data-f="unit" aria-label="Unidad">${unitOptions(i.unit)}</select>
       <input class="input" data-f="name" placeholder="Ingrediente" value="${esc(i.name)}" aria-label="Ingrediente">
+      <button class="icon-btn ${linked ? 'is-linked' : ''}" data-act="link-ing" aria-label="${linked ? 'Cambiar receta vinculada' : 'Vincular una receta (p. ej. una salsa)'}">${icon('link', 'ic-sm')}</button>
       <button class="icon-btn" data-act="del-ing" aria-label="Quitar ingrediente">${icon('x', 'ic-sm')}</button>
+      <div class="frac-bar" aria-label="Fracciones">${FRACTIONS.map(([, sym]) => `<button type="button" data-frac="${sym}" aria-label="Añadir ${sym}">${sym}</button>`).join('')}</div>
+      ${linked ? `<div class="ing-link">${icon('book-open', 'ic-sm')}<span>Receta vinculada: <strong>${esc(linked.name)}</strong></span>
+        <button type="button" class="icon-btn" data-act="unlink-ing" aria-label="Quitar vínculo">${icon('x', 'ic-sm')}</button></div>` : ''}
     </div>`;
   }
 
@@ -1186,6 +1243,16 @@ async function EditorView(app, id, params) {
   };
 
   const onClick = async (e) => {
+    const fr = e.target.closest('[data-frac]');
+    if (fr) {
+      e.preventDefault();
+      const input = fr.closest('[data-ing]').querySelector('[data-f="qty"]');
+      const whole = (input.value.match(/^\s*(\d+)(?![\d.,\/])/) || [])[1] || '';
+      input.value = (whole === '0' ? '' : whole) + fr.dataset.frac;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+      return;
+    }
     const a = e.target.closest('[data-act]');
     if (!a) return;
     e.preventDefault();
@@ -1202,6 +1269,26 @@ async function EditorView(app, id, params) {
         version.ingredients.push(ing); markDirty();
         $('#ing-list', app).insertAdjacentHTML('beforeend', ingRow(ing));
         $(`[data-ing="${ing.id}"] [data-f="qty"]`, app).focus();
+        break;
+      }
+      case 'link-ing': {
+        const row = a.closest('[data-ing]');
+        const ing = version.ingredients.find((i) => i.id === row.dataset.ing);
+        const r = await pickRecipe('Vincular receta', { exclude: draft.id });
+        if (!r) return;
+        ing.recipeId = r.id;
+        if (!ing.name.trim()) ing.name = r.name;
+        if (ing.qty == null && !ing.unit) ing.unit = '';
+        markDirty();
+        row.outerHTML = ingRow(ing);
+        toast(`Vinculada: ${r.name}`);
+        break;
+      }
+      case 'unlink-ing': {
+        const row = a.closest('[data-ing]');
+        const ing = version.ingredients.find((i) => i.id === row.dataset.ing);
+        delete ing.recipeId; markDirty();
+        row.outerHTML = ingRow(ing);
         break;
       }
       case 'del-ing': {
@@ -1273,6 +1360,9 @@ async function EditorView(app, id, params) {
   app.addEventListener('submit', onSubmit);
   const onEnter = (e) => { if (e.key === 'Enter' && e.target.matches('input')) e.preventDefault(); };
   app.addEventListener('keydown', onEnter);
+  // Que tocar una fracción no quite el foco del campo de cantidad (si no, la barra se escondería)
+  const keepFocus = (e) => { if (e.target.closest('[data-frac]')) e.preventDefault(); };
+  app.addEventListener('pointerdown', keepFocus);
   const onUnload = (e) => { if (dirty && !saved) { e.preventDefault(); e.returnValue = ''; } };
   window.addEventListener('beforeunload', onUnload);
 
@@ -1282,6 +1372,7 @@ async function EditorView(app, id, params) {
       app.removeEventListener('input', onInput); app.removeEventListener('change', onInput);
       app.removeEventListener('click', onClick); app.removeEventListener('submit', onSubmit);
       app.removeEventListener('keydown', onEnter);
+      app.removeEventListener('pointerdown', keepFocus);
       window.removeEventListener('beforeunload', onUnload);
     },
   };
@@ -1559,8 +1650,8 @@ function thumbHTML(imageId) {
 }
 
 /** Hoja para elegir una receta con buscador. Devuelve la receta o undefined. */
-async function pickRecipe(title = 'Elige una receta') {
-  const recipes = (await Store.list()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+async function pickRecipe(title = 'Elige una receta', { exclude = null } = {}) {
+  const recipes = (await Store.list()).filter((r) => r.id !== exclude).sort((a, b) => a.name.localeCompare(b.name, 'es'));
   await Images.preload(recipes.map((r) => r.coverImageId));
   if (!recipes.length) { toast('Aún no tienes recetas'); return undefined; }
   return Sheets.open((el, close) => {

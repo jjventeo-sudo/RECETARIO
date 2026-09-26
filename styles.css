@@ -385,21 +385,35 @@ button { cursor: pointer; }
 
 .ing-row {
   display: grid; gap: 8px; align-items: center;
-  grid-template-columns: 84px 124px 1fr 44px;
-  grid-template-areas: "qty unit name del";
+  grid-template-columns: 84px 124px 1fr 44px 44px;
+  grid-template-areas: "qty unit name lnk del" "frac frac frac frac frac" "sub sub sub sub sub";
 }
 .ing-row [data-f="qty"] { grid-area: qty; }
 .ing-row [data-f="unit"] { grid-area: unit; }
 .ing-row [data-f="name"] { grid-area: name; }
-.ing-row .icon-btn { grid-area: del; width: 44px; height: 44px; color: var(--text-3); }
+.ing-row [data-act="link-ing"] { grid-area: lnk; }
+.ing-row [data-act="del-ing"] { grid-area: del; }
+.ing-row > .icon-btn { width: 44px; height: 44px; color: var(--text-3); }
+.ing-row > .icon-btn.is-linked { color: var(--accent); }
 /* En móvil: el nombre arriba a lo ancho, cantidad y unidad debajo */
 @media (max-width: 560px) {
   .ing-row {
     grid-template-columns: 96px 1fr 44px;
-    grid-template-areas: "name name del" "qty unit .";
+    grid-template-areas: "name name del" "qty unit lnk" "frac frac frac" "sub sub sub";
     padding-bottom: 12px; border-bottom: 1px solid var(--line);
   }
 }
+.frac-bar { grid-area: frac; display: none; gap: 6px; }
+.ing-row:has([data-f="qty"]:focus) .frac-bar { display: flex; }
+.frac-bar button {
+  min-width: 48px; min-height: 40px; border-radius: 12px; border: 1px solid #5b4420;
+  background: transparent; color: var(--accent); font-size: 18px;
+}
+.ing-link { grid-area: sub; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-2); }
+.ing-link .ic { color: var(--accent); }
+.ing-link strong { color: var(--text); font-weight: 500; }
+.ing-link .icon-btn { width: 36px; height: 36px; margin-left: auto; color: var(--text-3); }
+
 
 .step-edit {
   display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-card); background: #0a0908;
@@ -653,3 +667,11 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
 .voice-hint { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--accent); }
 .card-preview { width: 100%; max-width: 480px; margin: 6px auto 0; border-radius: 12px; border: 1px solid var(--line); }
 .day.is-past { opacity: .55; }
+
+/* Ingrediente que es otra receta */
+.ing.has-link { grid-template-columns: 28px 92px 1fr auto; }
+.ing-open {
+  display: inline-flex; align-items: center; gap: 6px; align-self: center;
+  min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid #5b4420;
+  background: transparent; color: var(--accent); font-size: 13px;
+}
