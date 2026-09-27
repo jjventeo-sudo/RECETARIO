@@ -1,6 +1,6 @@
 /* Service worker: guarda la app para que funcione sin conexión.
    Al publicar cambios, sube el número de CACHE para que los móviles se actualicen. */
-const CACHE = 'recetario-v1.7.0';
+const CACHE = 'recetario-v1.8.0';
 const ASSETS = [
   './',
   './index.html',

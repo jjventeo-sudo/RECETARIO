@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 
 /* =========================================================================
    1. Utilidades
@@ -383,7 +383,7 @@ const Store = {
    ========================================================================= */
 
 const Docs = (() => {
-  const NAMES = ['plan', 'shopRecipes', 'shopManual', 'shopChecks', 'categories', 'pantry'];
+  const NAMES = ['plan', 'shopRecipes', 'shopManual', 'shopChecks', 'categories', 'pantry', 'catOrder'];
   const listeners = new Set();
 
   const get = async (name) => (await Meta.get(`doc:${name}`)) || {};
@@ -454,7 +454,7 @@ const Categories = {
     const live = Docs.live(await Docs.get('categories'));
     const names = new Map(Object.values(live).map((c) => [norm(c.name), c.name]));
     for (const r of recipes || []) if (r.category && !names.has(norm(r.category))) names.set(norm(r.category), r.category);
-    return [...names.values()].sort((a, b) => a.localeCompare(b, 'es'));
+    return Categories.ordered([...names.values()]);
   },
   async add(name) {
     const clean = name.trim().replace(/\s+/g, ' ');
@@ -474,6 +474,23 @@ const Categories = {
     await Docs.remove('categories', norm(name));
     for (const r of await Store.list()) if (norm(r.category) === norm(name)) { r.category = ''; await Store.save(r); }
   },
+
+  /* Orden de las categorías (el que eliges en Ajustes). Se guarda como una lista de
+     nombres normalizados y se sincroniza entera: gana el último orden que guardaste. */
+  CULINARY: ['desayunos', 'entrantes', 'ensaladas', 'cremas', 'verduras', 'legumbres', 'arroces', 'pastas', 'guisos', 'carnes', 'pescados', 'mariscos', 'salsas', 'panes y masas', 'postres', 'bebidas'],
+  async order() { return Docs.live(await Docs.get('catOrder')).order?.list || null; },
+  /** Ordena nombres de categoría según tu orden; las que no estén van detrás por orden de cocina. */
+  sortWith(names, saved) {
+    const rank = (n) => {
+      const k = norm(n);
+      if (saved) { const i = saved.indexOf(k); if (i >= 0) return i; }
+      const j = Categories.CULINARY.indexOf(k);
+      return (saved ? saved.length : 0) + (j >= 0 ? j : 100);
+    };
+    return [...names].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b, 'es'));
+  },
+  async ordered(names) { return Categories.sortWith(names, await Categories.order()); },
+  async setOrder(names) { await Docs.put('catOrder', 'order', { list: names.map(norm) }); },
 };
 
 /* ---------- Información nutricional (aproximada) ----------
@@ -850,6 +867,74 @@ const Router = (() => {
    7. Vistas
    ========================================================================= */
 
+/* Preferencias de apariencia (se guardan en este dispositivo) */
+const Prefs = {
+  intro: true, spin: true, grain: true,
+  async load() { for (const k of ['intro', 'spin', 'grain']) this[k] = await Meta.get(`pref:${k}`, true); this.apply(); },
+  apply() { document.documentElement.classList.toggle('grain', !!this.grain); },
+};
+
+/* Movimiento de la portada: aparecer al entrar en pantalla, carrusel y giro suave de los platos */
+const Motion = (() => {
+  let io = null, onScroll = null, carousel = null, onCar = null;
+  const still = () => reducedMotion();
+  function bind(root) {
+    unbind();
+    const els = $$('.reveal', root);
+    if (still() || !('IntersectionObserver' in window)) els.forEach((e) => e.classList.add('in'));
+    else {
+      io = new IntersectionObserver((es) => es.forEach((en) => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } }), { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+      els.forEach((e) => io.observe(e));
+    }
+    carousel = $('#carousel', root);
+    if (carousel) {
+      const dots = $$('#dots i', root);
+      onCar = () => requestAnimationFrame(() => {
+        if (!carousel) return;
+        const r = carousel.getBoundingClientRect(), c = r.left + r.width / 2;
+        let best = 0, bd = Infinity;
+        [...carousel.children].forEach((el, i) => { const b = el.getBoundingClientRect(); const d = Math.abs(b.left + b.width / 2 - c); if (d < bd) { bd = d; best = i; } });
+        [...carousel.children].forEach((el, i) => el.classList.toggle('on', i === best));
+        dots.forEach((d, i) => d.classList.toggle('on', i === best));
+        if (Prefs.spin && !still()) $$('.spin img', carousel).forEach((img, i) => { img.style.transform = `rotate(${carousel.scrollLeft * 0.08 + i * 23}deg)`; });
+      });
+      carousel.addEventListener('scroll', onCar, { passive: true });
+    }
+    if (Prefs.spin && !still()) {
+      onScroll = () => requestAnimationFrame(() => {
+        const y = scrollY;
+        $$('.cat-group .spin img', root).forEach((img, i) => { img.style.transform = `rotate(${(y * 0.05 + i * 31) % 360}deg)`; });
+      });
+      addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+    }
+  }
+  function unbind() {
+    io?.disconnect(); io = null;
+    if (onScroll) removeEventListener('scroll', onScroll);
+    if (carousel && onCar) carousel.removeEventListener('scroll', onCar);
+    onScroll = onCar = carousel = null;
+  }
+  return { bind, unbind };
+})();
+
+/* Apertura: tu foto aparece desde el negro y se escribe el nombre. Solo al abrir la app. */
+function playIntro() {
+  let seen = false;
+  try { seen = sessionStorage.getItem('introSeen') === '1'; sessionStorage.setItem('introSeen', '1'); } catch { /* */ }
+  if (seen || !Prefs.intro || reducedMotion()) return;
+  const el = document.createElement('div');
+  el.className = 'intro';
+  el.setAttribute('aria-hidden', 'true');
+  const word = [...'Recetario'].map((ch, i) => `<span style="animation-delay:${(0.9 + i * 0.06).toFixed(2)}s">${ch}</span>`).join('');
+  el.innerHTML = `<img src="chef.webp" alt=""><div class="intro-brand"><div class="intro-word serif">${word}</div><div class="intro-rule"></div>
+    <div class="intro-sub serif">del chef JJ</div><div class="intro-caps">Cocinando fit</div></div>`;
+  document.body.append(el);
+  const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 800); };
+  el.addEventListener('click', close);
+  setTimeout(close, 3500);
+}
+
 const UI = { homeFilter: 'all', homeQuery: '', homeTime: 0, lastRecipeId: null };
 const TIME_FILTERS = [[0, 'Cualquier tiempo'], [15, 'Hasta 15 min'], [30, 'Hasta 30 min'], [60, 'Hasta 1 h']];
 
@@ -860,7 +945,8 @@ async function HomeView(app) {
   await Images.preload(recipes.map((r) => r.coverImageId));
   const banner = await backupReminder(recipes.length);
 
-  const categories = [...new Set(recipes.map((r) => r.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+  const catOrder = await Categories.order();
+  const categories = Categories.sortWith([...new Set(recipes.map((r) => r.category).filter(Boolean))], catOrder);
   if (UI.homeFilter !== 'all' && UI.homeFilter !== 'fav' && !categories.includes(UI.homeFilter)) UI.homeFilter = 'all';
 
   const todayRaw = new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -899,7 +985,11 @@ async function HomeView(app) {
   ${tabbarHTML('home')}`;
 
   const results = $('#results', app);
-  const paint = () => { if (results) results.innerHTML = homeResults(recipes); };
+  const paint = () => {
+    if (!results) return;
+    results.innerHTML = homeResults(recipes, catOrder);
+    Motion.bind(app);
+  };
   paint();
 
   const onClick = (e) => {
@@ -937,7 +1027,7 @@ async function HomeView(app) {
   q?.addEventListener('input', () => { UI.homeQuery = q.value; paint(); });
 
   const offSync = Sync.on((st) => { const slot = $('#sync-slot', app); if (slot) slot.innerHTML = st !== 'off' ? syncButtonHTML(st) : ''; });
-  return { destroy: () => { app.removeEventListener('click', onClick); offSync(); } };
+  return { destroy: () => { app.removeEventListener('click', onClick); offSync(); Motion.unbind(); } };
 }
 
 function emptyHome() {
@@ -953,7 +1043,7 @@ function matchesQuery(r, q) {
   return norm(q).split(/\s+/).every((w) => hay.includes(w));
 }
 
-function homeResults(recipes) {
+function homeResults(recipes, catOrder) {
   const q = UI.homeQuery.trim();
   let list = recipes.filter((r) => matchesQuery(r, q));
   if (UI.homeFilter === 'fav') list = list.filter((r) => r.favorite);
@@ -965,11 +1055,11 @@ function homeResults(recipes) {
     return `<p class="muted-empty" style="margin-top:28px">${q ? `No hay recetas con “${esc(q)}”.` : UI.homeTime ? 'Ninguna receta entra en ese tiempo. Recuerda poner el tiempo total al editar cada receta.' : 'No hay recetas en este filtro.'}</p>`;
   }
 
-  const card = (r) => {
+  const card = (r, i) => {
     const v = r.versions[0];
     const hero = r.id === UI.lastRecipeId;
-    return `<button class="card" data-go="#/receta/${r.id}" ${hero ? 'data-hero="1"' : ''}>
-      ${photoHTML(r.coverImageId, { alt: r.name, hero })}
+    return `<button class="card reveal" style="--d:${(i % 2) * 110}ms" data-go="#/receta/${r.id}" ${hero ? 'data-hero="1"' : ''}>
+      <div class="spin">${photoHTML(r.coverImageId, { alt: r.name, hero })}</div>
       ${r.category ? `<p class="card-kicker">${esc(r.category)}</p>` : ''}
       <h3 class="card-name serif">${esc(r.name || 'Sin nombre')}</h3>
       <div class="card-meta meta">
@@ -980,8 +1070,40 @@ function homeResults(recipes) {
     </button>`;
   };
 
-  let out = !q && UI.homeFilter === 'all' && !UI.homeTime ? `<h2 class="section-title serif">Todas las recetas</h2>` : '<div style="height:14px"></div>';
-  out += `<div class="grid">${list.map(card).join('')}</div>`;
+  const plain = !q && UI.homeFilter === 'all' && !UI.homeTime;
+  if (!plain) return `<div style="height:14px"></div><div class="grid">${list.map(card).join('')}</div>`;
+
+  // "La carta de hoy": platos con foto, primero favoritas y las últimas cocinadas
+  const withPhoto = list.filter((r) => r.coverImageId && Images.cached(r.coverImageId));
+  const pick = [...withPhoto].sort((a, b) => (b.favorite - a.favorite) || ((b.lastCookedAt || 0) - (a.lastCookedAt || 0)) || (b.updatedAt - a.updatedAt)).slice(0, 6);
+  let out = '';
+  if (pick.length >= 2) {
+    out += `<section class="carta" aria-label="La carta de hoy">
+      <div class="sec-head reveal"><h2 class="serif">La carta de hoy</h2></div>
+      <div class="carousel" id="carousel">${pick.map((r, i) => {
+        const v = r.versions[0];
+        return `<button class="dish ${i === 0 ? 'on' : ''}" data-go="#/receta/${r.id}">
+          <div class="spin">${photoHTML(r.coverImageId, { alt: r.name })}</div>
+          ${r.category ? `<span class="card-kicker">${esc(r.category)}</span>` : ''}
+          <span class="dish-name serif">${esc(r.name)}</span>
+          ${v.minutes ? `<span class="dish-meta">${formatMinutes(v.minutes)}</span>` : ''}
+        </button>`;
+      }).join('')}</div>
+      <div class="dots" id="dots" aria-hidden="true">${pick.map((_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>
+    </section>`;
+  }
+
+  // Todas las recetas agrupadas por categoría, en el orden que elegiste en Ajustes
+  const OTHER = 'Otras recetas';
+  const cats = Categories.sortWith([...new Set(list.map((r) => r.category).filter(Boolean))], catOrder);
+  const groups = cats.map((c) => [c, list.filter((r) => r.category === c)]);
+  const rest = list.filter((r) => !r.category);
+  if (rest.length) groups.push([OTHER, rest]);
+  const byName = (a, b) => (b.favorite - a.favorite) || a.name.localeCompare(b.name, 'es');
+  out += groups.map(([c, rs]) => `<section class="cat-group">
+      <div class="sec-head reveal"><h2 class="serif">${esc(c)}</h2><span>${rs.length}</span></div>
+      <div class="grid">${rs.sort(byName).map(card).join('')}</div>
+    </section>`).join('');
   return out;
 }
 
@@ -1095,7 +1217,11 @@ async function RecipeView(app, id, params) {
     const steps = version.prep.length + version.cook.length;
     const m = version.minutes || 0;
     const time = !m ? stat('—', 'minutos') : m < 60 ? stat(m, 'minutos') : stat(formatMinutes(m).replace(' min', '′').replace(' h', 'h'), 'tiempo');
-    return `<div class="stats">${time}${stat(version.servings || '—', (version.servings || 0) === 1 ? 'ración' : 'raciones')}${stat(steps || '—', steps === 1 ? 'paso' : 'pasos')}</div>`;
+    const nu = Nutrition.perServing(recipe, version, allById);
+    const extra = nu.counted
+      ? stat(Math.round(nu.kcal), 'kcal') + stat(Math.round(nu.p), 'g prot.')
+      : stat(steps || '—', steps === 1 ? 'paso' : 'pasos');
+    return `<div class="stats ${nu.counted ? 'four' : ''}">${time}${stat(version.servings || '—', (version.servings || 0) === 1 ? 'ración' : 'raciones')}${extra}</div>`;
   }
 
   function stepsHTML() {
@@ -1129,6 +1255,7 @@ async function RecipeView(app, id, params) {
             ${photoHTML(recipe.coverImageId, { alt: recipe.name, hero: true })}
             ${recipe.category ? `<p class="recipe-kicker">${esc(recipe.category)}</p>` : ''}
             <h1 class="recipe-name serif">${esc(recipe.name || 'Sin nombre')}</h1>
+            <div class="ornament" aria-hidden="true"><b></b><i></i><b></b></div>
             ${statsHTML()}
           </section>
         </div>
@@ -1851,9 +1978,12 @@ async function CookView(app, id, params) {
     const t = Timers.get(s.id);
     const remaining = t ? t.remaining : s.timerMin * 60;
     const state = t?.done ? 'is-done' : t?.running ? 'is-running' : '';
+    const total = t ? t.total : s.timerMin * 60;
+    const C = 2 * Math.PI * 54;
     return `<div class="timer-card ${state}" data-timer-card="${s.id}">
-      <span class="label">Temporizador</span>
-      <span class="timer-digits" data-digits>${formatClock(remaining)}</span>
+      <div class="ring" aria-hidden="true"><svg viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="54"/>
+        <circle class="ring-fg" data-ring cx="60" cy="60" r="54" style="stroke-dasharray:${C};stroke-dashoffset:${C * (1 - remaining / total)}"/></svg>
+        <span class="timer-digits" data-digits>${formatClock(remaining)}</span></div>
       <div class="timer-controls">
         ${t?.running
           ? `<button class="btn" data-act="pause">${icon('pause', 'ic-sm')}Pausar</button>`
@@ -1912,7 +2042,11 @@ async function CookView(app, id, params) {
       const wantState = t?.done ? 'is-done' : t?.running ? 'is-running' : '';
       const hasState = card.classList.contains('is-done') ? 'is-done' : card.classList.contains('is-running') ? 'is-running' : '';
       if (wantState !== hasState || (!!t) !== !!card.querySelector('[data-act="reset"]')) $('#timer', app).innerHTML = timerHTML(s);
-      else $('[data-digits]', card).textContent = formatClock(t ? t.remaining : s.timerMin * 60);
+      else {
+        const rem = t ? t.remaining : s.timerMin * 60, tot = t ? t.total : s.timerMin * 60;
+        $('[data-digits]', card).textContent = formatClock(rem);
+        const ring = $('[data-ring]', card); if (ring) ring.style.strokeDashoffset = String(2 * Math.PI * 54 * (1 - rem / tot));
+      }
     }
     const r = $('#running', app);
     if (r) r.innerHTML = runningHTML();
@@ -2483,11 +2617,21 @@ async function SettingsView(app) {
     </section>
 
     <section class="panel">
+      <h2 class="serif">Apariencia</h2>
+      <label class="switch"><input type="checkbox" data-pref="intro" ${Prefs.intro ? 'checked' : ''}>Apertura animada al abrir la app</label>
+      <label class="switch"><input type="checkbox" data-pref="spin" ${Prefs.spin ? 'checked' : ''}>Platos que giran al desplazarte</label>
+      <label class="switch"><input type="checkbox" data-pref="grain" ${Prefs.grain ? 'checked' : ''}>Textura de papel sobre el negro</label>
+    </section>
+
+    <section class="panel">
       <h2 class="serif">Categorías</h2>
-      <p>Crea las tuyas, cámbiales el nombre o bórralas. Al renombrar, las recetas se actualizan solas.</p>
-      <ul class="cat-list">${cats.map((c) => {
+      <p>Este es el orden en que aparecen tus recetas en el inicio: súbelas o bájalas con las flechas. También puedes crear, renombrar o borrar categorías.</p>
+      <ul class="cat-list">${cats.map((c, ci) => {
         const n = recipes.filter((r) => norm(r.category) === norm(c)).length;
-        return `<li><span>${esc(c)}<span class="hint"> ${n ? `${n} ${n === 1 ? 'receta' : 'recetas'}` : ''}</span></span>
+        return `<li><span class="cat-order">
+            <button class="icon-btn" data-cat-mv="${ci}|-1" ${ci === 0 ? 'disabled' : ''} aria-label="Subir ${esc(c)}">${icon('arrow-up', 'ic-sm')}</button>
+            <button class="icon-btn" data-cat-mv="${ci}|1" ${ci === cats.length - 1 ? 'disabled' : ''} aria-label="Bajar ${esc(c)}">${icon('arrow-down', 'ic-sm')}</button></span>
+          <span>${esc(c)}<span class="hint"> ${n ? `${n} ${n === 1 ? 'receta' : 'recetas'}` : ''}</span></span>
           <button class="icon-btn" data-cat-edit="${esc(c)}" aria-label="Renombrar ${esc(c)}">${icon('pencil', 'ic-sm')}</button>
           <button class="icon-btn" data-cat-del="${esc(c)}" aria-label="Borrar ${esc(c)}">${icon('trash-2', 'ic-sm')}</button></li>`;
       }).join('')}</ul>
@@ -2544,6 +2688,22 @@ async function SettingsView(app) {
   ${tabbarHTML('settings')}`;
 
   const onClick = async (e) => {
+    const mv = e.target.closest('[data-cat-mv]');
+    if (mv) {
+      const [i, d] = mv.dataset.catMv.split('|').map(Number);
+      const list = [...cats];
+      const j = i + d;
+      if (j < 0 || j >= list.length) return;
+      [list[i], list[j]] = [list[j], list[i]];
+      await Categories.setOrder(list);
+      const y = scrollY; await Router.render(); scrollTo(0, y);
+      return;
+    }
+    const pref = e.target.closest('[data-pref]');
+    if (pref) {
+      const k = pref.dataset.pref; Prefs[k] = pref.checked; await Meta.set(`pref:${k}`, pref.checked); Prefs.apply();
+      return;
+    }
     const rs = e.target.closest('[data-restore]');
     if (rs) { const r = await Store.restore(rs.dataset.restore); if (r) { toast('Receta recuperada', { label: 'Ver', run: () => Router.go(`#/receta/${r.id}`) }); Router.render(); } return; }
     const pg = e.target.closest('[data-purge]');
@@ -3707,8 +3867,10 @@ function registerServiceWorker() {
       w?.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) offer(w); });
     });
   }).catch(() => {});
+  // Solo se recarga al cambiar de versión, no la primera vez que se instala (así no se corta la apertura)
+  const hadController = !!navigator.serviceWorker.controller;
   let reloaded = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded) { reloaded = true; location.reload(); } });
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
 }
 
 Router.add(/^\/?$/, HomeView);
@@ -3722,6 +3884,8 @@ Router.add(/^\/compra$/, ShoppingView);
 (async function start() {
   if (!('indexedDB' in window)) { $('#app').innerHTML = '<p style="padding:24px">Este navegador no puede guardar recetas. Usa Chrome actualizado.</p>'; return; }
   try {
+    await Prefs.load().catch(() => {});
+    playIntro();
     await Router.render();
   } catch (err) {
     console.error(err);
