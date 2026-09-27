@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 
 /* =========================================================================
    1. Utilidades
@@ -383,7 +383,7 @@ const Store = {
    ========================================================================= */
 
 const Docs = (() => {
-  const NAMES = ['plan', 'shopRecipes', 'shopManual', 'shopChecks', 'categories', 'pantry', 'batchChecks'];
+  const NAMES = ['plan', 'shopRecipes', 'shopManual', 'shopChecks', 'categories', 'pantry'];
   const listeners = new Set();
 
   const get = async (name) => (await Meta.get(`doc:${name}`)) || {};
@@ -482,14 +482,37 @@ const Categories = {
    Los pesos por unidad ("1 pimiento ≈ 150 g") son medias orientativas.
    Formato de cada fila: [nombres, kcal, proteína, hidratos, grasa, gramos por unidad] */
 
-const NUTRI_ROWS = [[["arroz","arroz bomba","arroz redondo","arroz largo","arroz blanco"],360.0,6.6,79.3,0.6,null],[["arroz integral"],367.0,7.5,76.3,3.2,null],[["pasta","espaguetis","espagueti","macarrones","fideos","tallarines"],371.0,13.0,74.7,1.5,null],[["pasta integral"],352.0,13.9,73.4,2.9,null],[["harina","harina de trigo"],364.0,10.3,76.3,1.0,null],[["harina de avena","avena","copos de avena"],379.0,13.2,67.7,6.5,null],[["pan","pan de molde","barra de pan","baguette"],266.0,8.9,49.4,3.3,30],[["pan integral"],278.0,8.4,51.4,5.4,30],[["pan rallado"],395.0,13.4,72.0,5.3,null],[["azucar","azúcar"],387.0,0,100.0,0,null],[["miel"],304.0,0.3,82.4,0,null],[["aceite","aceite de oliva","aceite de oliva virgen extra","aove"],884.0,0,0,100.0,null],[["aceite de girasol"],884.0,0,0,100.0,null],[["mantequilla"],717.0,0.9,0.1,81.1,null],[["sal"],0,0,0,0,null],[["pimienta","pimienta negra"],251.0,10.4,64.0,3.3,null],[["pimenton","pimentón","pimentón dulce"],282.0,14.1,54.0,12.9,null],[["comino"],375.0,17.8,44.2,22.3,null],[["canela"],247.0,4.0,80.6,1.2,null],[["oregano","orégano"],265.0,9.0,68.9,4.3,null],[["azafran","azafrán"],310.0,11.4,65.4,5.9,null],[["curry"],325.0,14.3,55.8,14.0,null],[["vinagre"],21.0,0,0.9,0,null],[["salsa de soja","soja"],53.0,8.1,4.9,0.6,null],[["mostaza"],60.0,3.7,5.8,3.3,null],[["mayonesa"],680.0,1.0,0.6,74.9,null],[["ketchup","kétchup"],101.0,1.0,27.4,0.1,null],[["tomate","tomates","tomate pera","tomate rama"],18.0,0.9,3.9,0.2,120],[["tomate triturado","tomate natural triturado"],32.0,1.6,7.3,0.3,null],[["tomate frito","salsa de tomate"],50.0,1.4,7.4,1.6,null],[["tomate cherry","tomates cherry"],18.0,0.9,3.9,0.2,15],[["cebolla","cebollas"],40.0,1.1,9.3,0.1,150],[["cebolleta","cebolletas"],32.0,1.8,7.3,0.2,30],[["ajo","ajos","diente de ajo"],149.0,6.4,33.1,0.5,5],[["pimiento","pimiento rojo"],26.0,1.0,6.0,0.3,150],[["pimiento verde"],20.0,0.9,4.6,0.2,150],[["pimiento amarillo"],27.0,1.0,6.3,0.2,150],[["patata","patatas"],77.0,2.1,17.5,0.1,170],[["boniato","batata"],86.0,1.6,20.1,0.1,180],[["zanahoria","zanahorias"],41.0,0.9,9.6,0.2,70],[["calabacin","calabacín","calabacines"],17.0,1.2,3.1,0.3,200],[["berenjena","berenjenas"],25.0,1.0,5.9,0.2,250],[["calabaza"],26.0,1.0,6.5,0.1,null],[["puerro","puerros"],61.0,1.5,14.2,0.3,90],[["lechuga"],17.0,1.2,3.3,0.3,300],[["espinacas","espinaca"],23.0,2.9,3.6,0.4,null],[["acelgas","acelga"],19.0,1.8,3.7,0.2,null],[["brocoli","brócoli"],34.0,2.8,6.6,0.4,300],[["coliflor"],25.0,1.9,5.0,0.3,500],[["col","repollo"],25.0,1.3,5.8,0.1,null],[["champiñones","champiñon","champinones","setas"],22.0,3.1,3.3,0.3,20],[["judias verdes","judías verdes"],31.0,1.8,7.0,0.2,null],[["guisantes"],81.0,5.4,14.5,0.4,null],[["pepino"],15.0,0.7,3.6,0.1,250],[["apio"],14.0,0.7,3.0,0.2,40],[["esparragos","espárragos","espárragos verdes"],20.0,2.2,3.9,0.1,16],[["alcachofa","alcachofas"],47.0,3.3,10.5,0.2,120],[["maiz","maíz"],86.0,3.3,18.7,1.4,null],[["aguacate","aguacates"],160.0,2.0,8.5,14.7,170],[["limon","limón","limones"],29.0,1.1,9.3,0.3,100],[["zumo de limon","zumo de limón"],22.0,0.4,6.9,0.2,null],[["lima"],30.0,0.7,10.5,0.2,65],[["naranja","naranjas"],47.0,0.9,11.8,0.1,180],[["manzana","manzanas"],52.0,0.3,13.8,0.2,180],[["pera","peras"],57.0,0.4,15.2,0.1,180],[["platano","plátano","platanos","plátanos","banana"],89.0,1.1,22.8,0.3,120],[["fresas","fresa"],32.0,0.7,7.7,0.3,12],[["arandanos","arándanos"],57.0,0.7,14.5,0.3,null],[["frambuesas"],52.0,1.2,11.9,0.7,null],[["uvas"],69.0,0.7,18.1,0.2,null],[["piña"],50.0,0.5,13.1,0.1,null],[["mango"],60.0,0.8,15.0,0.4,300],[["kiwi"],61.0,1.1,14.7,0.5,75],[["melon","melón"],34.0,0.8,8.2,0.2,null],[["sandia","sandía"],30.0,0.6,7.6,0.2,null],[["perejil"],36.0,3.0,6.3,0.8,null],[["cilantro"],23.0,2.1,3.7,0.5,null],[["albahaca"],23.0,3.2,2.7,0.6,null],[["jengibre"],80.0,1.8,17.8,0.8,null],[["huevo","huevos"],143.0,12.6,0.7,9.5,55],[["clara de huevo","claras","claras de huevo"],52.0,10.9,0.7,0.2,33],[["yema","yemas"],322.0,15.9,3.6,26.5,17],[["leche","leche entera"],61.0,3.2,4.8,3.3,null],[["leche desnatada"],34.0,3.4,5.0,0.1,null],[["leche semidesnatada"],50.0,3.3,4.8,2.0,null],[["bebida de almendras","leche de almendras"],15.0,0.4,1.3,1.0,null],[["yogur","yogur natural"],61.0,3.5,4.7,3.3,125],[["yogur griego","yogur griego natural"],97.0,9.0,4.0,5.0,125],[["yogur griego 0%","yogur 0%","yogur desnatado"],59.0,10.2,3.6,0.4,125],[["nata","nata para cocinar","nata liquida","nata líquida"],340.0,2.8,2.8,36.1,null],[["queso","queso curado","queso manchego"],392.0,35.8,3.2,25.0,null],[["queso rallado","parmesano"],420.0,28.4,13.9,27.8,null],[["queso fresco","queso de burgos"],138.0,11.4,5.1,7.9,null],[["mozzarella"],254.0,24.3,2.8,15.9,125],[["queso crema","queso untable"],350.0,6.2,5.5,34.4,null],[["requeson","requesón","queso cottage"],81.0,10.5,4.8,2.3,null],[["pollo","pechuga de pollo","pechugas de pollo"],120,22.5,0,2.6,200],[["muslo de pollo","contramuslo","contramuslos"],121.0,19.7,0,4.1,100],[["pavo","pechuga de pavo"],114.0,23.3,0,2.3,null],[["carne picada de pavo","pavo picado"],150.0,18.7,0,8.3,null],[["carne picada","carne picada de ternera","ternera picada"],215.0,18.6,0,15.0,null],[["ternera","filete de ternera"],173.0,22.2,0,8.7,null],[["cerdo","lomo de cerdo","lomo"],198.0,19.7,0,12.6,null],[["solomillo de cerdo"],109.0,21.0,0,2.2,null],[["bacon","panceta","beicon"],393.0,13.7,0,37.1,null],[["jamon serrano","jamón serrano","jamon","jamón"],164.0,16.6,3.6,8.8,null],[["jamon york","jamón york","jamón cocido"],107.0,16.9,0.7,4.0,null],[["chorizo"],296.0,13.6,3.8,25.1,null],[["salmon","salmón"],208.0,20.4,0,13.4,null],[["atun","atún","atún en lata","atun en lata"],86.0,19.4,0,1.0,null],[["merluza","bacalao","pescado blanco"],82.0,17.8,0,0.7,null],[["gambas","gamba","langostinos","langostino"],85.0,20.1,0,0.5,15],[["mejillones","mejillon","mejillón"],86.0,11.9,3.7,2.2,null],[["almejas","almeja"],86.0,14.7,3.6,1.0,null],[["calamar","calamares","sepia"],92.0,15.6,3.1,1.4,null],[["pulpo"],82.0,14.9,2.2,1.0,null],[["sardinas","sardina"],208.0,24.6,0,11.5,null],[["garbanzos","garbanzo"],378.0,20.5,63.0,6.0,null],[["garbanzos cocidos"],139.0,7.1,22.5,2.8,null],[["lentejas","lenteja"],352.0,24.6,63.4,1.1,null],[["alubias","judias blancas","judías blancas","alubias blancas"],333.0,23.4,60.3,0.9,null],[["alubias rojas"],333.0,23.6,60.0,0.8,null],[["tofu"],144.0,17.3,2.8,8.7,null],[["almendras","almendra"],579.0,21.2,21.6,49.9,null],[["nueces","nuez"],654.0,15.2,13.7,65.2,null],[["avellanas"],628.0,15.0,16.7,60.8,null],[["cacahuetes"],567.0,25.8,16.1,49.2,null],[["crema de cacahuete","mantequilla de cacahuete"],598.0,22.2,22.3,51.4,null],[["pipas","semillas de girasol"],584.0,20.8,20.0,51.5,null],[["chia","semillas de chia","semillas de chía"],486.0,16.5,42.1,30.7,null],[["sesamo","sésamo"],573.0,17.7,23.5,49.7,null],[["cacao","cacao en polvo","cacao puro"],228.0,19.6,57.9,13.7,null],[["chocolate negro","chocolate"],598.0,7.8,45.9,42.6,null],[["levadura"],325.0,40.4,41.2,7.6,null],[["levadura quimica","levadura química","polvo de hornear"],51.0,0.1,24.1,0,null],[["maicena","almidon de maiz","almidón de maíz"],381.0,0.3,91.3,0.1,null],[["caldo","caldo de pollo"],6.0,0.6,0.4,0.2,null],[["caldo de verduras"],5.0,0.2,0.9,0.1,null],[["fumet","fumet de pescado","caldo de pescado"],16.0,2.0,0.4,0.6,null],[["vino blanco","vino"],82.0,0.1,2.6,0,null],[["vino tinto"],85.0,0.1,2.6,0,null],[["cerveza"],43.0,0.5,3.6,0,null],[["agua"],0,0,0,0,null],[["proteina en polvo","proteína en polvo","whey"],352.0,78.1,6.3,1.6,null],[["aceitunas"],116.0,0.8,6.0,10.9,4],[["tortilla de trigo","wrap","tortillas de trigo"],306.0,8.2,49.4,8.0,45],[["quinoa","quinoa"],368.0,14.1,64.2,6.1,null],[["cuscus","cuscús"],376.0,12.8,77.4,0.6,null],[["pan de hamburguesa"],279.0,9.8,50.1,3.9,50],[["edulcorante","eritritol","stevia"],0,0,0,0,null],[["gelatina"],335.0,85.6,0,0.1,null],[["coco rallado"],660.0,6.9,23.7,64.5,null],[["leche de coco"],197.0,2.0,2.8,21.3,null]];
+const NUTRI_ROWS = [[["arroz","arroz bomba","arroz redondo","arroz largo","arroz blanco"],360.0,6.6,79.3,0.6,null],[["arroz integral"],367.0,7.5,76.3,3.2,null],[["pasta","espaguetis","espagueti","macarrones","fideos","tallarines"],371.0,13.0,74.7,1.5,null],[["pasta integral"],352.0,13.9,73.4,2.9,null],[["harina","harina de trigo"],364.0,10.3,76.3,1.0,null],[["harina de avena","avena","copos de avena"],379.0,13.2,67.7,6.5,null],[["pan","pan de molde","barra de pan","baguette"],266.0,8.9,49.4,3.3,30],[["pan integral"],278.0,8.4,51.4,5.4,30],[["pan rallado"],395.0,13.4,72.0,5.3,null],[["azucar","azúcar"],387.0,0,100.0,0,null],[["miel"],304.0,0.3,82.4,0,null],[["aceite","aceite de oliva","aceite de oliva virgen extra","aove"],884.0,0,0,100.0,null],[["aceite de girasol"],884.0,0,0,100.0,null],[["mantequilla"],717.0,0.9,0.1,81.1,null],[["sal"],0,0,0,0,null],[["pimienta","pimienta negra"],251.0,10.4,64.0,3.3,null],[["pimenton","pimentón","pimentón dulce"],282.0,14.1,54.0,12.9,null],[["comino"],375.0,17.8,44.2,22.3,null],[["canela"],247.0,4.0,80.6,1.2,null],[["oregano","orégano"],265.0,9.0,68.9,4.3,null],[["azafran","azafrán"],310.0,11.4,65.4,5.9,null],[["curry"],325.0,14.3,55.8,14.0,null],[["vinagre"],21.0,0,0.9,0,null],[["salsa de soja","soja"],53.0,8.1,4.9,0.6,null],[["mostaza"],60.0,3.7,5.8,3.3,null],[["mayonesa"],680.0,1.0,0.6,74.9,null],[["ketchup","kétchup"],101.0,1.0,27.4,0.1,null],[["tomate","tomates","tomate pera","tomate rama"],18.0,0.9,3.9,0.2,120],[["tomate triturado","tomate natural triturado"],32.0,1.6,7.3,0.3,null],[["tomate frito","salsa de tomate"],50.0,1.4,7.4,1.6,null],[["tomate cherry","tomates cherry"],18.0,0.9,3.9,0.2,15],[["cebolla","cebollas"],40.0,1.1,9.3,0.1,150],[["cebolleta","cebolletas"],32.0,1.8,7.3,0.2,30],[["ajo","ajos","diente de ajo"],149.0,6.4,33.1,0.5,5],[["pimiento","pimiento rojo"],26.0,1.0,6.0,0.3,150],[["pimiento verde"],20.0,0.9,4.6,0.2,150],[["pimiento amarillo"],27.0,1.0,6.3,0.2,150],[["patata","patatas"],77.0,2.1,17.5,0.1,170],[["boniato","batata"],86.0,1.6,20.1,0.1,180],[["zanahoria","zanahorias"],41.0,0.9,9.6,0.2,70],[["calabacin","calabacín","calabacines"],17.0,1.2,3.1,0.3,200],[["berenjena","berenjenas"],25.0,1.0,5.9,0.2,250],[["calabaza"],26.0,1.0,6.5,0.1,null],[["puerro","puerros"],61.0,1.5,14.2,0.3,90],[["lechuga"],17.0,1.2,3.3,0.3,300],[["espinacas","espinaca"],23.0,2.9,3.6,0.4,null],[["acelgas","acelga"],19.0,1.8,3.7,0.2,null],[["brocoli","brócoli"],34.0,2.8,6.6,0.4,300],[["coliflor"],25.0,1.9,5.0,0.3,500],[["col","repollo"],25.0,1.3,5.8,0.1,null],[["champiñones","champiñon","champinones","setas"],22.0,3.1,3.3,0.3,20],[["judias verdes","judías verdes"],31.0,1.8,7.0,0.2,null],[["guisantes"],81.0,5.4,14.5,0.4,null],[["pepino"],15.0,0.7,3.6,0.1,250],[["apio"],14.0,0.7,3.0,0.2,40],[["esparragos","espárragos","espárragos verdes"],20.0,2.2,3.9,0.1,16],[["alcachofa","alcachofas"],47.0,3.3,10.5,0.2,120],[["maiz","maíz"],86.0,3.3,18.7,1.4,null],[["aguacate","aguacates"],160.0,2.0,8.5,14.7,170],[["limon","limón","limones"],29.0,1.1,9.3,0.3,100],[["zumo de limon","zumo de limón"],22.0,0.4,6.9,0.2,null],[["lima"],30.0,0.7,10.5,0.2,65],[["naranja","naranjas"],47.0,0.9,11.8,0.1,180],[["manzana","manzanas"],52.0,0.3,13.8,0.2,180],[["pera","peras"],57.0,0.4,15.2,0.1,180],[["platano","plátano","platanos","plátanos","banana"],89.0,1.1,22.8,0.3,120],[["fresas","fresa"],32.0,0.7,7.7,0.3,12],[["arandanos","arándanos"],57.0,0.7,14.5,0.3,null],[["frambuesas"],52.0,1.2,11.9,0.7,null],[["uvas"],69.0,0.7,18.1,0.2,null],[["piña"],50.0,0.5,13.1,0.1,null],[["mango"],60.0,0.8,15.0,0.4,300],[["kiwi"],61.0,1.1,14.7,0.5,75],[["melon","melón"],34.0,0.8,8.2,0.2,null],[["sandia","sandía"],30.0,0.6,7.6,0.2,null],[["perejil"],36.0,3.0,6.3,0.8,null],[["cilantro"],23.0,2.1,3.7,0.5,null],[["albahaca"],23.0,3.2,2.7,0.6,null],[["jengibre"],80.0,1.8,17.8,0.8,null],[["huevo","huevos"],143.0,12.6,0.7,9.5,55],[["clara de huevo","claras","claras de huevo"],52.0,10.9,0.7,0.2,33],[["yema","yemas"],322.0,15.9,3.6,26.5,17],[["leche entera"],61.0,3.2,4.8,3.3,null],[["leche desnatada"],34.0,3.4,5.0,0.1,null],[["leche","leche semidesnatada"],46.0,3.3,4.8,1.6,null],[["bebida de almendras","leche de almendras"],15.0,0.4,1.3,1.0,null],[["yogur","yogur natural"],61.0,3.5,4.7,3.3,125],[["yogur griego","yogur griego natural"],97.0,9.0,4.0,5.0,125],[["yogur griego 0%","yogur 0%","yogur desnatado"],59.0,10.2,3.6,0.4,125],[["nata","nata para montar","nata liquida","nata líquida"],340.0,2.8,2.8,36.1,null],[["nata para cocinar","nata ligera","nata para cocinar ligera"],195.0,2.5,3.5,18.0,null],[["queso","queso curado","queso manchego"],392.0,35.8,3.2,25.0,null],[["queso rallado","parmesano"],420.0,28.4,13.9,27.8,null],[["queso fresco","queso de burgos"],138.0,11.4,5.1,7.9,null],[["mozzarella"],254.0,24.3,2.8,15.9,125],[["queso crema","queso untable"],350.0,6.2,5.5,34.4,null],[["requeson","requesón","queso cottage"],81.0,10.5,4.8,2.3,null],[["pollo","pechuga de pollo","pechugas de pollo"],120,22.5,0,2.6,200],[["muslo de pollo","contramuslo","contramuslos"],121.0,19.7,0,4.1,100],[["pavo","pechuga de pavo"],114.0,23.3,0,2.3,null],[["carne picada de pavo","pavo picado"],150.0,18.7,0,8.3,null],[["carne picada","carne picada de ternera","ternera picada"],215.0,18.6,0,15.0,null],[["ternera","filete de ternera"],173.0,22.2,0,8.7,null],[["cerdo","lomo de cerdo","lomo"],198.0,19.7,0,12.6,null],[["solomillo de cerdo"],109.0,21.0,0,2.2,null],[["bacon","panceta","beicon"],393.0,13.7,0,37.1,null],[["jamon serrano","jamón serrano","jamon","jamón"],164.0,16.6,3.6,8.8,null],[["jamon york","jamón york","jamón cocido"],107.0,16.9,0.7,4.0,null],[["chorizo"],296.0,13.6,3.8,25.1,null],[["salmon","salmón"],208.0,20.4,0,13.4,null],[["atun","atún","atún en lata","atun en lata"],86.0,19.4,0,1.0,null],[["merluza","bacalao","pescado blanco"],82.0,17.8,0,0.7,null],[["gambas","gamba","langostinos","langostino"],85.0,20.1,0,0.5,15],[["mejillones","mejillon","mejillón"],86.0,11.9,3.7,2.2,null],[["almejas","almeja"],86.0,14.7,3.6,1.0,null],[["calamar","calamares","sepia"],92.0,15.6,3.1,1.4,null],[["pulpo"],82.0,14.9,2.2,1.0,null],[["sardinas","sardina"],208.0,24.6,0,11.5,null],[["garbanzos","garbanzo"],378.0,20.5,63.0,6.0,null],[["garbanzos cocidos"],139.0,7.1,22.5,2.8,null],[["lentejas","lenteja"],352.0,24.6,63.4,1.1,null],[["alubias","judias blancas","judías blancas","alubias blancas"],333.0,23.4,60.3,0.9,null],[["alubias rojas"],333.0,23.6,60.0,0.8,null],[["tofu"],144.0,17.3,2.8,8.7,null],[["almendras","almendra"],579.0,21.2,21.6,49.9,null],[["nueces","nuez"],654.0,15.2,13.7,65.2,null],[["avellanas"],628.0,15.0,16.7,60.8,null],[["cacahuetes"],567.0,25.8,16.1,49.2,null],[["crema de cacahuete","mantequilla de cacahuete"],598.0,22.2,22.3,51.4,null],[["pipas","semillas de girasol"],584.0,20.8,20.0,51.5,null],[["chia","semillas de chia","semillas de chía"],486.0,16.5,42.1,30.7,null],[["sesamo","sésamo"],573.0,17.7,23.5,49.7,null],[["cacao","cacao en polvo","cacao puro"],228.0,19.6,57.9,13.7,null],[["chocolate negro","chocolate"],598.0,7.8,45.9,42.6,null],[["levadura"],325.0,40.4,41.2,7.6,null],[["levadura quimica","levadura química","polvo de hornear"],51.0,0.1,24.1,0,null],[["maicena","almidon de maiz","almidón de maíz"],381.0,0.3,91.3,0.1,null],[["caldo","caldo de pollo"],6.0,0.6,0.4,0.2,null],[["caldo de verduras"],5.0,0.2,0.9,0.1,null],[["fumet","fumet de pescado","caldo de pescado"],16.0,2.0,0.4,0.6,null],[["vino blanco","vino"],82.0,0.1,2.6,0,null],[["vino tinto"],85.0,0.1,2.6,0,null],[["cerveza"],43.0,0.5,3.6,0,null],[["agua"],0,0,0,0,null],[["proteina en polvo","proteína en polvo","whey"],352.0,78.1,6.3,1.6,null],[["aceitunas"],116.0,0.8,6.0,10.9,4],[["tortilla de trigo","wrap","tortillas de trigo"],306.0,8.2,49.4,8.0,45],[["quinoa","quinoa"],368.0,14.1,64.2,6.1,null],[["cuscus","cuscús"],376.0,12.8,77.4,0.6,null],[["pan de hamburguesa"],279.0,9.8,50.1,3.9,50],[["edulcorante","eritritol","stevia"],0,0,0,0,null],[["gelatina"],335.0,85.6,0,0.1,null],[["coco rallado"],660.0,6.9,23.7,64.5,null],[["leche de coco"],197.0,2.0,2.8,21.3,null]];
+
+// Añadidos tras la auditoría: variantes 0 %, bebidas vegetales y básicos fit que se confundían con otros alimentos
+NUTRI_ROWS.push(
+  [['bebida de avena', 'leche de avena'], 45, 1, 7, 1.5, null],
+  [['bebida de soja', 'leche de soja'], 40, 3.3, 2.5, 1.8, null],
+  [['bebida de arroz', 'leche de arroz'], 50, 0.3, 10, 1, null],
+  [['queso fresco batido', 'queso batido', 'queso fresco batido 0%', 'queso batido 0%'], 46, 8, 4, 0.1, null],
+  [['yogur proteico', 'skyr', 'yogur alto en proteinas'], 60, 10, 4, 0.2, 125],
+  [['queso fresco 0%', 'queso de burgos 0%', 'queso fresco light'], 70, 12, 4, 0.5, null],
+  [['queso crema light', 'queso untable light'], 160, 8, 5, 12, null],
+  [['pimientos del piquillo', 'pimiento del piquillo'], 22, 1, 4, 0.3, 30],
+  [['hummus'], 166, 8, 14, 10, null],
+  [['salsa barbacoa'], 172, 0.8, 41, 0.6, null],
+  [['pesto'], 450, 5, 6, 45, null],
+  [['pan integral de hamburguesa', 'pan de hamburguesa integral'], 250, 11, 43, 3.5, 60],
+  [['arroz cocido'], 130, 2.7, 28, 0.3, null],
+  [['pasta cocida'], 158, 5.8, 31, 0.9, null],
+  [['lentejas cocidas'], 116, 9, 20, 0.4, null],
+  [['alubias cocidas'], 110, 7, 20, 0.5, null],
+  [['semillas de lino', 'lino'], 534, 18, 29, 42, null],
+  [['datiles', 'dátiles', 'datil', 'dátil'], 282, 2.5, 75, 0.4, 8],
+  [['sirope de agave', 'sirope'], 300, 0, 75, 0, null],
+);
 
 const Nutrition = (() => {
+  const clean = (t) => ' ' + norm(t).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
   const index = [];
-  NUTRI_ROWS.forEach((row) => row[0].forEach((a) => index.push({ a: norm(a), row })));
+  NUTRI_ROWS.forEach((row) => row[0].forEach((a) => index.push({ a: clean(a).trim(), row })));
   index.sort((x, y) => y.a.length - x.a.length); // primero lo más concreto: "carne picada de pavo" antes que "pavo"
   const byKey = new Map(NUTRI_ROWS.map((r) => [r[0][0], r]));
-  const clean = (t) => ' ' + norm(t).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
 
   function match(ing) {
     if (ing.nutriKey === 'none') return null;
@@ -1598,7 +1621,7 @@ async function EditorView(app, id, params) {
         break;
       }
       case 'new-cat': {
-        const name = await promptSheet({ title: 'Nueva categoría', label: 'Nombre', placeholder: 'Desayunos, Batch cooking, Sin gluten…', ok: 'Crear' });
+        const name = await promptSheet({ title: 'Nueva categoría', label: 'Nombre', placeholder: 'Desayunos, Cenas ligeras, Sin gluten…', ok: 'Crear' });
         if (!name) return;
         const pretty = await Categories.add(name);
         if (!categories.some((c) => norm(c) === norm(pretty))) { categories.push(pretty); categories.sort((a, b) => a.localeCompare(b, 'es')); }
@@ -2136,8 +2159,7 @@ async function MenuView(app) {
         }).join('')}
       </div>
       ${weekEntries.length ? `<div class="week-cta">
-        <button class="btn btn-primary btn-block" data-act="to-shop">${icon('shopping-cart', 'ic-sm')}Añadir la semana a la lista de la compra</button>
-        <button class="btn btn-block" data-act="batch">${icon('layers-2', 'ic-sm')}Plan de batch cooking</button></div>` : ''}
+        <button class="btn btn-primary btn-block" data-act="to-shop">${icon('shopping-cart', 'ic-sm')}Añadir la semana a la lista de la compra</button></div>` : ''}
     </div>
     ${tabbarHTML('menu')}`;
     if (firstPaint) {
@@ -2236,7 +2258,6 @@ async function MenuView(app) {
     if (a.dataset.act === 'next') { UI.menuWeek++; firstPaint = true; paint(); }
     if (a.dataset.act === 'today') { UI.menuWeek = 0; firstPaint = true; paint(); }
     if (a.dataset.act === 'to-shop') weekToShopping();
-    if (a.dataset.act === 'batch') Router.go('#/batch');
   };
   await paint();
   app.addEventListener('click', onClick);
@@ -2418,94 +2439,6 @@ async function ShoppingView(app) {
   return { destroy: () => { app.removeEventListener('click', onClick); app.removeEventListener('keydown', onKey); off(); } };
 }
 
-/* ---------- 7.9 Plan de batch cooking ----------
-   Junta lo que se puede adelantar de toda la semana del menú:
-   ingredientes que se repiten, elaboraciones vinculadas (salsas, masas…)
-   y los pasos de preparación de cada receta, para dejarlo listo de una vez. */
-
-async function BatchView(app) {
-  const recipes = await Store.list();
-  const byId = new Map(recipes.map((r) => [r.id, r]));
-  await Images.preload(recipes.map((r) => r.coverImageId));
-  const monday = Dates.monday(UI.menuWeek || 0);
-  const weekKey = Dates.key(monday);
-  const days = Array.from({ length: 7 }, (_, i) => Dates.addDays(monday, i));
-
-  async function paint() {
-    const plan = Docs.live(await Docs.get('plan'));
-    const checks = Docs.live(await Docs.get('batchChecks'));
-    const meals = [];
-    days.forEach((d) => SLOTS.forEach(([s, label]) => {
-      const e = plan[`${Dates.key(d)}|${s}`];
-      const r = e && byId.get(e.recipeId);
-      if (!r) return;
-      const v = r.versions.find((x) => x.id === e.versionId) || r.versions[0];
-      meals.push({ r, v, servings: e.servings, when: `${Dates.weekday(d)} ${label.toLowerCase()}`, slot: `${Dates.key(d)}|${s}` });
-    }));
-
-    // Ingredientes que aparecen en dos o más comidas
-    const uses = new Map();
-    for (const m of meals) {
-      for (const it of Shopping.aggregate([{ recipeId: m.r.id, versionId: m.v.id, servings: m.servings }], byId)) {
-        if (!uses.has(it.key)) uses.set(it.key, []);
-        uses.get(it.key).push(m.when);
-      }
-    }
-    const total = Shopping.aggregate(meals.map((m) => ({ recipeId: m.r.id, versionId: m.v.id, servings: m.servings })), byId);
-    // Lo que va "al gusto" o una pizca no hace falta prepararlo
-    const shared = total.filter((it) => (uses.get(it.key) || []).length > 1 && !['al gusto', 'una pizca', ''].includes(it.label));
-
-    // Elaboraciones vinculadas (se pueden hacer una vez para toda la semana)
-    const subs = new Map();
-    for (const m of meals) for (const i of m.v.ingredients) {
-      const sub = i.recipeId && byId.get(i.recipeId);
-      if (sub) { if (!subs.has(sub.id)) subs.set(sub.id, { sub, for: [] }); subs.get(sub.id).for.push(`${m.r.name} (${m.when})`); }
-    }
-
-    const check = (key, text) => {
-      const done = !!checks[key]?.done;
-      return `<li class="batch-step ${done ? 'is-done' : ''}" data-bcheck="${esc(key)}" role="checkbox" aria-checked="${done}" tabindex="0"><span class="tick">${icon('check', 'ic-sm')}</span><span>${esc(text)}</span></li>`;
-    };
-    const y = window.scrollY;
-    app.innerHTML = `<div class="page has-tabbar"><div class="batch">
-      <div class="topbar"><button class="icon-btn" data-act="back" aria-label="Volver al menú">${icon('arrow-left')}</button><span class="grow"></span></div>
-      <p class="home-date">${Dates.short(days[0])} – ${Dates.short(days[6])}</p>
-      <h1 class="home-title serif" style="font-size:clamp(36px,10vw,54px)">Batch cooking</h1>
-      <p class="hint" style="margin-top:8px">Todo lo que puedes dejar listo de una vez para la semana. Marca lo que vayas terminando.</p>
-      ${!meals.length ? `<div class="empty"><h2 class="serif">Semana vacía</h2><p>Añade recetas al menú de esta semana y aquí aparecerá qué puedes adelantar.</p></div>` : `
-      ${shared.length ? `<section class="block"><h2 class="block-title serif">Se repite en varias comidas</h2>
-        <p class="hint" style="margin:4px 0 10px">Prepáralo todo junto: lávalo, córtalo o cuécelo de una vez.</p>
-        <ul class="shop-list">${shared.map((it) => `<li class="batch-shared"><span class="shop-name">${esc(it.name)}<span class="shop-from">${esc(uses.get(it.key).join(', '))}</span></span><span class="shop-qty">${esc(it.label)}</span></li>`).join('')}</ul></section>` : ''}
-      ${subs.size ? `<section class="block"><h2 class="block-title serif">Elaboraciones para adelantar</h2>
-        <div class="pick-list" style="max-height:none;margin:8px 0 0">${[...subs.values()].map((x) => `<button class="pick-row" data-open="${x.sub.id}">${thumbHTML(x.sub.coverImageId)}
-          <span><span class="pick-name serif">${esc(x.sub.name)}</span><span class="pick-meta" style="white-space:normal">Para ${esc(x.for.join(', '))}</span></span></button>`).join('')}</div></section>` : ''}
-      <section class="block"><h2 class="block-title serif">Preparaciones de la semana</h2>
-        ${meals.map((m) => `<div class="batch-meal"><p class="card-kicker">${esc(m.when)}</p><h3 class="serif batch-name" data-open="${m.r.id}">${esc(m.r.name)} <span>${m.servings} ${m.servings === 1 ? 'ración' : 'raciones'}</span></h3>
-          ${m.v.prep.length ? `<ul class="batch-steps">${m.v.prep.map((st) => check(`${weekKey}|${m.slot}|${st.id}`, st.text)).join('')}</ul>` : '<p class="hint">Sin pasos de preparación: se hace en el momento.</p>'}</div>`).join('')}
-      </section>`}
-    </div></div>
-    ${tabbarHTML('menu')}`;
-    window.scrollTo(0, y);
-  }
-
-  const onClick = async (e) => {
-    const o = e.target.closest('[data-open]');
-    if (o) { Router.go(`#/receta/${o.dataset.open}`); return; }
-    const c = e.target.closest('[data-bcheck]');
-    if (c) {
-      const on = c.getAttribute('aria-checked') !== 'true';
-      c.classList.toggle('is-done', on); c.setAttribute('aria-checked', String(on));
-      await Docs.put('batchChecks', c.dataset.bcheck, { done: on }, { quiet: true });
-      return;
-    }
-    if (e.target.closest('[data-act="back"]')) Router.back('#/menu');
-  };
-  await paint();
-  app.addEventListener('click', onClick);
-  const off = Docs.on((name) => { if (name === 'plan' || name === 'batchChecks' || name === '*') paint(); });
-  return { destroy: () => { app.removeEventListener('click', onClick); off(); } };
-}
-
 /* ---------- 7.5 Ajustes y copias ---------- */
 
 function syncStatusText(lastSync) {
@@ -2638,7 +2571,7 @@ async function SettingsView(app) {
     if (!a) return;
     if (a.dataset.act === 'back') { Router.back('#/'); return; }
     if (a.dataset.act === 'cat-add') {
-      const name = await promptSheet({ title: 'Nueva categoría', label: 'Nombre', placeholder: 'Desayunos, Batch cooking, Sin gluten…', ok: 'Crear' });
+      const name = await promptSheet({ title: 'Nueva categoría', label: 'Nombre', placeholder: 'Desayunos, Cenas ligeras, Sin gluten…', ok: 'Crear' });
       if (name) { await Categories.add(name); Router.render(); }
       return;
     }
@@ -3024,93 +2957,218 @@ const Book = (() => {
     return c;
   }
 
-  /** Dibuja una receta; devuelve la lista de lienzos (puede ocupar varias páginas). */
-  async function recipePages(r, byId, firstNumber) {
-    const v = r.versions[0];
-    const pages = [];
-    let { c, x } = newPage(); pages.push(c);
-    let y = M;
-    const src = Images.cached(r.coverImageId);
-    if (src) {
-      const img = await loadImg(src);
-      if (img) { Card.drawFloating(x, img, (W - 560) / 2, y - 20, 560); y += 540; }
-    } else y += 20;
-    x.textAlign = 'center';
-    if (r.category) { x.fillStyle = C.accent; x.font = `400 26px ${SANS}`; x.fillText(r.category, W / 2, y + 20); y += 34; }
-    x.fillStyle = C.text; x.font = `400 66px ${SERIF}`;
-    for (const l of Card.wrap(x, r.name, W - 2 * M).slice(0, 2)) { y += 74; x.fillText(l, W / 2, y); }
-    const n = Nutrition.perServing(r, v, byId);
-    const steps = v.prep.length + v.cook.length;
-    const meta = [v.minutes ? formatMinutes(v.minutes) : '', `${v.servings || 1} ${v.servings === 1 ? 'ración' : 'raciones'}`, steps ? `${steps} pasos` : '', n.counted ? `≈ ${Math.round(n.kcal)} kcal/ración` : ''].filter(Boolean).join('      ');
-    y += 50; x.fillStyle = C.text2; x.font = `400 25px ${SANS}`; x.fillText(meta, W / 2, y);
-    if (r.versions.length > 1) { y += 36; x.fillStyle = C.text3; x.font = `italic 400 22px ${SANS}`; x.fillText(`Otras versiones en la app: ${r.versions.slice(1).map((o) => o.name).join(', ')}`, W / 2, y); }
-    x.textAlign = 'left';
-    y += 34; x.fillStyle = C.line; x.fillRect(M, y, W - 2 * M, 2); y += 50;
+  /* --- Maquetación de una receta ---------------------------------------
+     Estructura fija en todas las recetas, pase lo que pase con el espacio:
+       1. Cabecera (solo en su primera página): foto, categoría, título, datos
+       2. Ingredientes a dos columnas (se leen de arriba abajo, columna a columna)
+       3. Preparación   4. Elaboración   5. Notas
+     Todo a una sola columna de texto: si no cabe, sigue en la página siguiente
+     con el mismo ancho y un rótulo "continuación". Nada se corta ni se pierde.
+     dry = true: solo mide (para saber en qué página empieza cada receta). */
 
-    // Columna izquierda: ingredientes con puntos guía
-    const colL = M, colLW = 400, colR = M + colLW + 60, colRW = W - M - colR, maxY = H - 120;
-    let yl = y;
-    const ingList = v.ingredients.filter((z) => z.name.trim());
-    if (ingList.length) { x.fillStyle = C.text; x.font = `400 34px ${SERIF}`; x.fillText('Ingredientes', colL, yl); yl += 20; }
-    x.font = `400 23px ${SANS}`;
-    for (const i of ingList) {
-      const q = qtyLabel(i.qty, i.unit);
-      const qW = x.measureText(q).width;
-      const lines = Card.wrap(x, i.name, colLW - qW - 30);
-      yl += 38;
-      if (yl > maxY) break;
-      x.fillStyle = C.text; lines.forEach((l, k) => x.fillText(l, colL, yl + k * 30));
-      const lastW = x.measureText(lines[lines.length - 1]).width;
-      const ly = yl + (lines.length - 1) * 30;
-      x.fillStyle = C.dim; for (let d = colL + lastW + 10; d < colL + colLW - qW - 10; d += 9) x.fillRect(d, ly - 6, 2.5, 2.5);
-      x.fillStyle = C.accent; x.fillText(q, colL + colLW - qW, ly);
-      yl += (lines.length - 1) * 30;
+  const BODY = 24, LINE = 34;
+
+  /** Parte un texto en líneas respetando los saltos de línea que escribiste. */
+  function paragraphs(x, text, maxW) {
+    return String(text || '').split(/\n+/).map((p) => p.trim()).filter(Boolean).flatMap((p) => breakLong(x, Card.wrap(x, p, maxW), maxW));
+  }
+  /** Palabras más largas que la línea (p. ej. una dirección web) se parten a trozos. */
+  function breakLong(x, lines, maxW) {
+    const out = [];
+    for (const l of lines) {
+      if (x.measureText(l).width <= maxW) { out.push(l); continue; }
+      let cur = '';
+      for (const ch of l) { if (x.measureText(cur + ch).width > maxW) { out.push(cur); cur = ch; } else cur += ch; }
+      if (cur) out.push(cur);
     }
+    return out;
+  }
 
-    // Columna derecha: preparación y elaboración (continúa en otra página si no cabe)
-    let yr = y, cx = colR, cw = colRW;
-    const block = (h) => {
-      if (yr + h > maxY) {
-        ({ c, x } = newPage()); pages.push(c);
-        x.fillStyle = C.text3; x.font = `italic 400 30px ${SERIF}`; x.fillText(`${r.name} (continuación)`, M, M + 10);
-        yr = M + 60; cx = M; cw = W - 2 * M;
+  /** Recorta un texto con "…" si no cabe en una línea. */
+  function ellipsize(x, text, maxW) {
+    if (x.measureText(text).width <= maxW) return text;
+    let t = text;
+    while (t.length > 1 && x.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+    return t.trimEnd() + '…';
+  }
+
+  let measureCtx = null;
+  function measurer() {
+    if (!measureCtx) { const c = document.createElement('canvas'); c.width = c.height = 8; measureCtx = c.getContext('2d'); }
+    return measureCtx;
+  }
+
+  async function recipePages(r, byId, firstNumber, { dry = false, pageOf = null, onPage = null } = {}) {
+    const v = r.versions[0];
+    const TW = W - 2 * M, maxY = H - 130;
+    let x = null, y = 0, count = 0, current = null;
+
+    const finish = async () => {
+      if (!current) return;
+      footer(x, firstNumber + count - 1);
+      if (!dry) await onPage(current);
+      current = null;
+    };
+    const start = async (cont) => {
+      await finish();
+      count++;
+      if (dry) { x = measurer(); } else { const p = newPage(); current = p.c; x = p.x; }
+      y = M;
+      if (cont) {
+        x.textAlign = 'left'; x.fillStyle = C.text3; x.font = `italic 400 26px ${SERIF}`;
+        x.fillText(ellipsize(x, `${r.name}, continuación`, TW), M, y + 6);
+        x.fillStyle = C.line; x.fillRect(M, y + 26, TW, 2);
+        y += 76;
       }
     };
-    const section = (title, list) => {
-      if (!list.length) return;
-      block(80);
-      x.fillStyle = C.text; x.font = `400 34px ${SERIF}`; x.fillText(title, cx, yr); yr += 26;
-      list.forEach((st, k) => {
-        x.font = `400 23px ${SANS}`;
-        const lines = Card.wrap(x, st.text, cw - 70);
-        const h = 20 + lines.length * 32;
-        block(h + 10);
-        yr += 34;
-        x.fillStyle = C.accent; x.font = `italic 400 34px ${SERIF}`; x.fillText(String(k + 1).padStart(2, '0'), cx, yr + 4);
-        x.fillStyle = C.text; x.font = `400 23px ${SANS}`;
-        lines.forEach((l, j) => x.fillText(l, cx + 70, yr + j * 32));
-        yr += (lines.length - 1) * 32 + 8;
-      });
-      yr += 40;
-    };
-    section('Preparación', v.prep);
-    section('Elaboración', v.cook);
-    // Las notas van bajo los ingredientes si caben ahí (la columna izquierda suele quedar corta)
-    x.font = `italic 400 22px ${SERIF}`;
-    const noteLines = v.notes ? Card.wrap(x, v.notes.replace(/\n/g, ' '), colLW) : [];
-    if (noteLines.length && pages.length === 1 && yl + 110 + noteLines.length * 30 < maxY) {
-      const px = pages[0].getContext('2d');
-      yl += 70; px.fillStyle = C.text; px.font = `400 34px ${SERIF}`; px.fillText('Notas', colL, yl); yl += 42;
-      px.fillStyle = C.text2; px.font = `italic 400 22px ${SERIF}`; noteLines.forEach((l) => { px.fillText(l, colL, yl); yl += 30; });
-    } else if (v.notes) {
-      x.font = `italic 400 24px ${SERIF}`;
-      const lines = Card.wrap(x, v.notes.replace(/\n/g, ' '), cw);
-      block(60 + lines.length * 32);
-      x.fillStyle = C.text; x.font = `400 34px ${SERIF}`; x.fillText('Notas', cx, yr); yr += 44;
-      x.fillStyle = C.text2; x.font = `italic 400 24px ${SERIF}`; lines.forEach((l) => { x.fillText(l, cx, yr); yr += 32; });
+    const ensure = async (h) => { if (y + h > maxY) { await start(true); return true; } return false; };
+
+    await start(false);
+
+    // 1. Cabecera
+    const src = Images.cached(r.coverImageId);
+    if (src) {
+      if (!dry) { const img = await loadImg(src); if (img) Card.drawFloating(x, img, (W - 440) / 2, y - 24, 440); }
+      y += 420;
     }
-    pages.forEach((p, k) => footer(p.getContext('2d'), firstNumber + k));
-    return pages;
+    x.textAlign = 'center';
+    if (r.category) { y += 30; x.fillStyle = C.accent; x.font = `400 26px ${SANS}`; x.fillText(r.category, W / 2, y); y += 8; }
+    let titleSize = 66;
+    x.font = `400 ${titleSize}px ${SERIF}`;
+    let title = Card.wrap(x, r.name, TW);
+    if (title.length > 2) { titleSize = 52; x.font = `400 ${titleSize}px ${SERIF}`; title = Card.wrap(x, r.name, TW); }
+    x.fillStyle = C.text;
+    for (const l of title) { y += titleSize * 1.12; x.fillText(l, W / 2, y); }
+    const n = Nutrition.perServing(r, v, byId);
+    const steps = v.prep.length + v.cook.length;
+    const meta = [v.minutes ? formatMinutes(v.minutes) : '', `${v.servings || 1} ${(v.servings || 1) === 1 ? 'ración' : 'raciones'}`, steps ? `${steps} ${steps === 1 ? 'paso' : 'pasos'}` : ''].filter(Boolean).join('       ');
+    y += 52; x.fillStyle = C.text2; x.font = `400 25px ${SANS}`; x.fillText(meta, W / 2, y);
+    if (n.counted) {
+      y += 38; x.fillStyle = C.accent; x.font = `400 23px ${SANS}`;
+      x.fillText(`Por ración, aprox.: ${Math.round(n.kcal)} kcal     ${Math.round(n.p)} g proteína     ${Math.round(n.c)} g hidratos     ${Math.round(n.f)} g grasa`, W / 2, y);
+    }
+    if (r.versions.length > 1) {
+      y += 34; x.fillStyle = C.text3; x.font = `italic 400 21px ${SANS}`;
+      x.fillText(`Versión «${v.name}». Otras versiones en la app: ${r.versions.slice(1).map((o) => o.name).join(', ')}`, W / 2, y);
+    }
+    x.textAlign = 'left';
+    y += 36; x.fillStyle = C.line; x.fillRect(M, y, TW, 2); y += 30;
+
+    const heading = async (text, next) => {
+      await ensure(70 + next); // el título nunca se queda solo al pie de una página
+      y += 50; x.fillStyle = C.text; x.font = `400 34px ${SERIF}`; x.fillText(text, M, y); y += 14;
+    };
+
+    // 2. Ingredientes a dos columnas
+    const ings = v.ingredients.filter((z) => z.name.trim());
+    if (ings.length) {
+      const GAP = 56, colW = (TW - GAP) / 2;
+      x.font = `400 ${BODY}px ${SANS}`;
+      const items = ings.map((i) => {
+        const q = qtyLabel(i.qty, i.unit);
+        const qW = q ? x.measureText(q).width : 0;
+        const sub = i.recipeId && byId.get(i.recipeId);
+        const lines = breakLong(x, Card.wrap(x, i.name, colW - qW - 28), colW - qW - 28);
+        const note = sub ? (pageOf?.get(sub.id) ? `Receta en la pág. ${pageOf.get(sub.id)}` : 'Receta aparte') : '';
+        return { q, qW, lines, note, h: lines.length * 30 + (note ? 26 : 0) + 14 };
+      });
+      await heading('Ingredientes', items[0].h + 10);
+      let i = 0;
+      while (i < items.length) {
+        const top = y + 18;
+        const room = maxY - top;
+        // ¿Cuánto cabe en esta página? Si cabe todo, se reparte a partes iguales entre las dos columnas
+        let fitH = 0, fitN = 0;
+        for (let k = i; k < items.length; k++) { if (fitH + items[k].h > room * 2) break; fitH += items[k].h; fitN++; }
+        if (!fitN) { await start(true); continue; }
+        const slice = items.slice(i, i + fitN);
+        const allHere = i + fitN === items.length;
+        // Columna izquierda primero; si todo cabe en esta página, se reparte a la mitad para que quede equilibrado
+        const cols = [[], []]; let acc = 0, inRight = false;
+        for (const it of slice) {
+          const fitsLeft = acc + it.h <= room;
+          const wantLeft = allHere ? acc + it.h / 2 <= fitH / 2 : true;
+          if (!inRight && (!cols[0].length || (fitsLeft && wantLeft))) { cols[0].push(it); acc += it.h; }
+          else { inRight = true; cols[1].push(it); }
+        }
+        // Ninguna columna puede pasar del pie: lo que no quepa en la derecha pasa a la página siguiente
+        let rightH = cols[1].reduce((a, b) => a + b.h, 0);
+        while (rightH > room && cols[1].length) { rightH -= cols[1].pop().h; fitN--; }
+        let bottom = top;
+        cols.forEach((col, ci) => {
+          let cy = top;
+          const cx = M + ci * (colW + GAP);
+          for (const it of col) {
+            cy += 30;
+            x.font = `400 ${BODY}px ${SANS}`; x.fillStyle = C.text;
+            it.lines.forEach((l, k) => x.fillText(l, cx, cy + k * 30));
+            const ly = cy + (it.lines.length - 1) * 30;
+            const lastW = x.measureText(it.lines[it.lines.length - 1]).width;
+            x.fillStyle = C.dim;
+            for (let d = cx + lastW + 10; d < cx + colW - it.qW - 10; d += 9) x.fillRect(d, ly - 6, 2.5, 2.5);
+            if (it.q) { x.fillStyle = C.accent; x.fillText(it.q, cx + colW - it.qW, ly); }
+            cy = ly;
+            if (it.note) { cy += 26; x.fillStyle = C.accent; x.font = `italic 400 20px ${SERIF}`; x.fillText(it.note, cx, cy); }
+            cy += 14;
+          }
+          bottom = Math.max(bottom, cy);
+        });
+        i += fitN;
+        y = bottom;
+        if (i < items.length) await start(true);
+      }
+    }
+
+    if (!ings.length && !v.prep.length && !v.cook.length) {
+      y += 60; x.fillStyle = C.text3; x.font = `italic 400 26px ${SERIF}`; x.textAlign = 'center';
+      x.fillText('Receta pendiente de completar.', W / 2, y); x.textAlign = 'left';
+    }
+
+    // 3 y 4. Preparación y elaboración
+    const section = async (title, list) => {
+      if (!list.length) return;
+      x.font = `400 ${BODY}px ${SANS}`;
+      const blocks = list.map((st, k) => {
+        const lines = paragraphs(x, st.text, TW - 80);
+        const timer = st.timerMin ? `Temporizador: ${formatMinutes(st.timerMin)}` : '';
+        return { num: String(k + 1).padStart(2, '0'), lines: lines.length ? lines : [''], timer };
+      });
+      const firstH = 26 + Math.min(blocks[0].lines.length, 3) * LINE;
+      await heading(title, firstH);
+      for (const b of blocks) {
+        const h = 26 + b.lines.length * LINE + (b.timer ? 30 : 0);
+        // Un paso corto nunca se parte; uno muy largo sí, pero línea a línea, sin perder nada
+        if (h < (maxY - M) * 0.5) await ensure(h);
+        else await ensure(26 + LINE * 2);
+        y += 26;
+        let first = true;
+        for (let k = 0; k < b.lines.length; k++) {
+          if (!first && y + LINE > maxY) await start(true);
+          y += first ? 8 : LINE;
+          if (first) { x.fillStyle = C.accent; x.font = `italic 400 34px ${SERIF}`; x.fillText(b.num, M, y + 4); }
+          x.fillStyle = C.text; x.font = `400 ${BODY}px ${SANS}`; x.fillText(b.lines[k], M + 80, y);
+          first = false;
+        }
+        if (b.timer) { y += 30; x.fillStyle = C.accent; x.font = `400 20px ${SANS}`; x.fillText(b.timer, M + 80, y); }
+        y += 6;
+      }
+    };
+    await section('Preparación', v.prep);
+    await section('Elaboración', v.cook);
+
+    // 5. Notas
+    if (v.notes && v.notes.trim()) {
+      x.font = `italic 400 ${BODY}px ${SERIF}`;
+      const lines = paragraphs(x, v.notes, TW);
+      await heading('Notas', 20 + Math.min(lines.length, 2) * LINE);
+      y += 14;
+      for (const l of lines) {
+        if (y + LINE > maxY) await start(true);
+        y += LINE; x.fillStyle = C.text2; x.font = `italic 400 ${BODY}px ${SERIF}`; x.fillText(l, M, y);
+      }
+    }
+    await finish();
+    return count;
   }
 
   function indexPages(groups, count) {
@@ -3125,7 +3183,7 @@ const Book = (() => {
       for (const it of list) {
         line(46); y += 46;
         x.fillStyle = C.text; x.font = `400 30px ${SERIF}`;
-        const name = Card.wrap(x, it.name, W - 2 * M - 120)[0];
+        const name = ellipsize(x, it.name, W - 2 * M - 140);
         x.fillText(name, M, y);
         const num = String(it.page ?? '');
         x.font = `400 26px ${SANS}`; const nw = x.measureText(num).width;
@@ -3137,31 +3195,27 @@ const Book = (() => {
   }
 
   /* --- PDF mínimo: una imagen JPEG por página --- */
-  async function toPdf(canvases, onProgress) {
+  async function toPdf(pages) {
     const enc = new TextEncoder();
     const parts = []; const offsets = []; let size = 0;
     const push = (d) => { const b = typeof d === 'string' ? enc.encode(d) : d; parts.push(b); size += b.length; };
     const obj = (n, body) => { offsets[n] = size; push(`${n} 0 obj\n`); body(); push('\nendobj\n'); };
-    push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
-    const n = canvases.length;
+    push('%PDF-1.4\n');
+    const n = pages.length;
     const kids = Array.from({ length: n }, (_, i) => `${3 + i * 3} 0 R`).join(' ');
-    obj(1, () => push('<< /Type /Catalog /Pages 2 0 R >>'));
+    obj(1, () => push('<< /Type /Catalog /Pages 2 0 R /PageLayout /SinglePage >>'));
     obj(2, () => push(`<< /Type /Pages /Kids [${kids}] /Count ${n} >>`));
-    for (let i = 0; i < n; i++) {
-      const cv = canvases[i];
-      const jpg = new Uint8Array(await (await new Promise((res) => cv.toBlob(res, 'image/jpeg', 0.86))).arrayBuffer());
+    pages.forEach((pg, i) => {
       const p = 3 + i * 3, content = p + 1, img = p + 2;
       const cs = `q 595.28 0 0 841.89 0 0 cm /Im${i} Do Q`;
       obj(p, () => push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im${i} ${img} 0 R >> >> /Contents ${content} 0 R >>`));
       obj(content, () => { push(`<< /Length ${cs.length} >>\nstream\n${cs}\nendstream`); });
-      obj(img, () => { push(`<< /Type /XObject /Subtype /Image /Width ${cv.width} /Height ${cv.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`); push(jpg); push('\nendstream'); });
-      cv.width = cv.height = 0; // liberar memoria
-      onProgress?.(i + 1, n);
-    }
-    const xref = size, total = 3 + n * 3;
-    let t = `xref\n0 ${total}\n0000000000 65535 f \n`;
-    for (let k = 1; k < total; k++) t += `${String(offsets[k]).padStart(10, '0')} 00000 n \n`;
-    push(t + `trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
+      obj(img, () => { push(`<< /Type /XObject /Subtype /Image /Width ${pg.w} /Height ${pg.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${pg.bytes.length} >>\nstream\n`); push(pg.bytes); push('\nendstream'); });
+    });
+    const xref = size, totalObj = 3 + n * 3;
+    let t = `xref\n0 ${totalObj}\n0000000000 65535 f \n`;
+    for (let k = 1; k < totalObj; k++) t += `${String(offsets[k]).padStart(10, '0')} 00000 n \n`;
+    push(t + `trailer\n<< /Size ${totalObj} /Root 1 0 R /Info << /Title (Recetario del chef JJ) >> >>\nstartxref\n${xref}\n%%EOF`);
     return new Blob(parts, { type: 'application/pdf' });
   }
 
@@ -3170,23 +3224,39 @@ const Book = (() => {
     const recipes = (await Store.list()).filter((r) => r.name.trim());
     const byId = new Map(recipes.map((r) => [r.id, r]));
     await Images.preload(recipes.map((r) => r.coverImageId));
-    const cats = [...new Set(recipes.map((r) => r.category || 'Otras recetas'))].sort((a, b) => (a === 'Otras recetas') - (b === 'Otras recetas') || a.localeCompare(b, 'es'));
-    const groups = cats.map((cat) => [cat, recipes.filter((r) => (r.category || 'Otras recetas') === cat).sort((a, b) => a.name.localeCompare(b.name, 'es')).map((r) => ({ r, name: r.name }))]);
+    const OTHER = 'Otras recetas';
+    const cats = [...new Set(recipes.map((r) => r.category || OTHER))].sort((a, b) => (a === OTHER) - (b === OTHER) || a.localeCompare(b, 'es'));
+    const groups = cats.map((cat) => [cat, recipes.filter((r) => (r.category || OTHER) === cat).sort((a, b) => a.name.localeCompare(b.name, 'es')).map((r) => ({ r, name: r.name }))]);
+
+    // Pasada 1: medir cuántas páginas ocupa cada receta, para numerar el índice y las referencias
+    onProgress?.('Calculando páginas…');
     const idxCount = indexPages(groups, true);
+    const pageOf = new Map();
     let pageNo = 1 + idxCount + 1;
-    const recipeCanvases = [];
-    let done = 0;
-    const totalR = recipes.length;
     for (const [, list] of groups) for (const it of list) {
-      it.page = pageNo;
-      const pages = await recipePages(it.r, byId, pageNo);
-      pageNo += pages.length;
-      recipeCanvases.push(...pages);
-      onProgress?.(`Dibujando recetas ${++done} de ${totalR}`);
-      await new Promise((r) => setTimeout(r, 0));
+      it.page = pageNo; pageOf.set(it.r.id, pageNo);
+      pageNo += await recipePages(it.r, byId, pageNo, { dry: true });
     }
-    const all = [await cover(await loadImg('chef.webp')), ...indexPages(groups, false), ...recipeCanvases];
-    return toPdf(all, (i, n) => onProgress?.(`Montando el libro ${i} de ${n}`));
+    const total = pageNo - 1;
+
+    // Pasada 2: dibujar. Cada página se convierte a JPEG en cuanto se termina y el lienzo se libera,
+    // así el móvil no se queda sin memoria con libros largos.
+    const pages = [];
+    let done = 0;
+    const toJpeg = async (canvas) => {
+      const bytes = new Uint8Array(await (await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.86))).arrayBuffer());
+      pages.push({ bytes, w: canvas.width, h: canvas.height });
+      canvas.width = canvas.height = 0;
+      onProgress?.(`Página ${pages.length} de ${total}`);
+      await new Promise((r) => setTimeout(r, 0));
+    };
+    await toJpeg(await cover(await loadImg('chef.webp')));
+    for (const p of indexPages(groups, false)) await toJpeg(p);
+    for (const [, list] of groups) for (const it of list) {
+      await recipePages(it.r, byId, it.page, { pageOf, onPage: toJpeg });
+      done++;
+    }
+    return toPdf(pages);
   }
 
   return { build };
@@ -3648,7 +3718,6 @@ Router.add(/^\/cocinar\/([^/]+)$/, CookView);
 Router.add(/^\/ajustes$/, SettingsView);
 Router.add(/^\/menu$/, MenuView);
 Router.add(/^\/compra$/, ShoppingView);
-Router.add(/^\/batch$/, BatchView);
 
 (async function start() {
   if (!('indexedDB' in window)) { $('#app').innerHTML = '<p style="padding:24px">Este navegador no puede guardar recetas. Usa Chrome actualizado.</p>'; return; }
