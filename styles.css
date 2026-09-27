@@ -574,25 +574,36 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
 .sync-btn.is-spinning .ic { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ---------- Barra inferior de secciones ---------- */
-.page.has-tabbar { padding-bottom: calc(var(--safe-bottom) + 170px); }
+/* ---------- Barra inferior flotante con "+" central ---------- */
+.page.has-tabbar { padding-bottom: calc(var(--safe-bottom) + 130px); }
 .tabbar {
-  position: fixed; z-index: 25; left: 0; right: 0; bottom: 0;
-  display: flex; justify-content: center; gap: 4px;
-  padding: 8px 12px calc(var(--safe-bottom) + 8px);
-  background: rgba(0, 0, 0, .86); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-  border-top: 1px solid var(--line);
+  position: fixed; z-index: 25; left: 0; right: 0; bottom: 0; pointer-events: none;
+  display: flex; justify-content: center;
+  padding: 0 14px calc(var(--safe-bottom) + 14px);
+}
+.tabbar-pill {
+  pointer-events: auto; width: min(100%, 520px); height: 66px;
+  display: grid; grid-template-columns: 1fr 1fr 72px 1fr 1fr; align-items: center;
+  border-radius: 33px; background: rgba(20, 18, 16, .92);
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--line); box-shadow: 0 12px 34px rgba(0, 0, 0, .7);
 }
 .tab {
-  flex: 0 1 160px; min-height: 52px; border-radius: 14px;
+  height: 56px; border-radius: 22px; margin: 0 2px;
   display: grid; justify-items: center; align-content: center; gap: 2px;
-  color: var(--text-3); text-decoration: none; font-size: 12px;
+  color: var(--text-3); text-decoration: none; font-size: 11px;
   transition: color var(--dur) var(--ease), background var(--dur);
 }
 .tab .ic { width: 22px; height: 22px; }
 .tab.is-on { color: var(--accent); }
-.tab:active { background: var(--s1); }
-.has-tabbar ~ .fab, .fab { bottom: calc(var(--safe-bottom) + 88px); }
+.tab:active { background: var(--s2); }
+.tab-add {
+  justify-self: center; width: 58px; height: 58px; margin-top: -30px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--accent); color: var(--on-accent);
+  border: 5px solid #000; transition: transform 140ms var(--ease), background var(--dur);
+}
+.tab-add .ic { width: 26px; height: 26px; stroke-width: 2.2; }
+.tab-add:active { transform: scale(.92); background: var(--accent-press); }
 
 /* ---------- Miniaturas y selector de recetas ---------- */
 .thumb { width: 52px; height: 52px; flex: none; display: grid; place-items: center; color: var(--s3); }
@@ -703,3 +714,75 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
   .chef-hero { width: min(100%, 520px); }
   .chef-hero img { max-height: 58dvh; }
 }
+
+/* ---------- 1. Título en dos niveles ---------- */
+.home-title { font-size: clamp(42px, 12vw, 64px); line-height: .95; }
+.home-sub {
+  display: block; margin: 6px 0 0 3px; font-size: .42em; font-style: italic;
+  color: var(--accent); letter-spacing: 0;
+}
+
+/* ---------- 2. Buscador como una línea ---------- */
+.search .input {
+  background: transparent; border: 0; border-bottom: 1px solid var(--s3); border-radius: 0;
+  padding-left: 32px; min-height: 46px;
+}
+.search .input:focus { background: transparent; border-bottom-color: var(--accent); }
+.search .ic { left: 2px; }
+
+/* ---------- 3 y 6. Pestañas de texto con subrayado azafrán ---------- */
+.text-tabs { gap: 22px; }
+.text-tabs .chip {
+  min-height: 40px; padding: 0; border: 0; border-radius: 0; background: none;
+  color: var(--text-3); font-size: 15px; position: relative;
+}
+.text-tabs .chip::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 4px; height: 2px; border-radius: 1px;
+  background: var(--accent); transform: scaleX(0); transition: transform var(--dur) var(--ease);
+}
+.text-tabs .chip[aria-pressed="true"], .text-tabs .chip.is-on { background: none; color: var(--text); }
+.text-tabs .chip[aria-pressed="true"]::after, .text-tabs .chip.is-on::after { transform: scaleX(1); }
+.text-tabs .text-tab-add { color: var(--accent); }
+.text-tabs .text-tab-add::after { display: none; }
+.versions-block .text-tabs { justify-content: center; }
+
+/* ---------- 4. Categoría encima del nombre ---------- */
+.card-kicker { margin: 4px 0 0; font-size: 12px; color: var(--accent); letter-spacing: .01em; }
+.card-kicker + .card-name { margin-top: 1px; }
+
+/* ---------- 6. Ficha con números grandes ---------- */
+.recipe-kicker { margin: -4px 0 2px; font-size: 13px; color: var(--accent); }
+.stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); width: min(100%, 420px); margin-top: 18px;
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.stat { display: grid; justify-items: center; padding: 12px 4px; }
+.stat + .stat { border-left: 1px solid var(--line); }
+.stat-n { font-size: 28px; line-height: 1.1; font-variant-numeric: lining-nums; }
+.stat-l { font-size: 12px; color: var(--text-3); }
+
+/* ---------- 7. Ingredientes como la carta de un restaurante ---------- */
+.menu-ings { list-style: none; margin: 0; padding: 0; }
+.menu-ing {
+  display: flex; align-items: baseline; gap: 8px; padding: 10px 0; cursor: pointer;
+  transition: opacity var(--dur) var(--ease);
+}
+.menu-ing .name { font-size: 16px; }
+.menu-ing .leader { flex: 1; min-width: 16px; border-bottom: 1.5px dotted #3a342e; transform: translateY(-4px); }
+.menu-ing .qty { font-size: 15px; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.menu-ing .ing-open { align-self: center; }
+.menu-ing.is-done { opacity: .38; }
+.menu-ing.is-done .name { text-decoration: line-through; text-decoration-color: var(--text-3); }
+.ing-hint { margin-top: 6px; font-size: 12px; }
+
+/* ---------- 8. Pasos con números editoriales ---------- */
+.step { grid-template-columns: 46px 1fr; gap: 10px; }
+.step-num {
+  width: auto; height: auto; border: 0; border-radius: 0; place-items: start;
+  font-size: 30px; line-height: 1; font-style: italic; color: var(--accent);
+}
+.step.is-done .step-num { background: none; color: #5b4420; }
+.step.is-done .step-text { color: var(--text-3); text-decoration: none; }
+
+/* Barra superior de la receta: fondo que funde a negro para que el texto no se cruce con los botones */
+.recipe-top { background: linear-gradient(to bottom, #000 45%, rgba(0, 0, 0, 0)); }

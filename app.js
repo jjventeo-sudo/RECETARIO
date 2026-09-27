@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 /* =========================================================================
    1. Utilidades
@@ -732,10 +732,9 @@ async function HomeView(app) {
         <p class="home-date">${esc(today)}</p>
         <div style="display:flex;gap:4px">
           <span id="sync-slot">${Sync.state !== 'off' ? syncButtonHTML(Sync.state) : ''}</span>
-          <button class="icon-btn" data-go="#/ajustes" aria-label="Ajustes y sincronización">${icon('settings-2')}</button>
         </div>
       </div>
-      <h1 class="home-title serif">Recetario del chef JJ</h1>
+      <h1 class="home-title serif">Recetario<span class="home-sub">del chef JJ</span></h1>
     </header>
     <section class="chef-hero" aria-label="Cocinando fit con JJ">
       <img src="chef.webp" alt="El chef JJ con su chaqueta blanca, sonriendo y de brazos cruzados" width="1000" height="1140" decoding="async">
@@ -746,15 +745,14 @@ async function HomeView(app) {
       <div class="home-tools">
         <label class="search"><span class="sr-only">Buscar</span>${icon('search', 'ic-sm')}
           <input class="input" type="search" id="q" placeholder="Buscar plato o ingrediente" value="${esc(UI.homeQuery)}" autocomplete="off"></label>
-        <div class="chips" role="toolbar" aria-label="Filtrar recetas">
+        <div class="chips text-tabs" role="toolbar" aria-label="Filtrar recetas">
           <button class="chip" data-filter="all" aria-pressed="${UI.homeFilter === 'all'}">Todas</button>
-          <button class="chip" data-filter="fav" aria-pressed="${UI.homeFilter === 'fav'}">${icon('heart', 'ic-sm')}Favoritas</button>
+          <button class="chip" data-filter="fav" aria-pressed="${UI.homeFilter === 'fav'}">Favoritas</button>
           ${categories.map((c) => `<button class="chip" data-filter="${esc(c)}" aria-pressed="${UI.homeFilter === c}">${esc(c)}</button>`).join('')}
         </div>
       </div>
       <div id="results"></div>` : emptyHome()}
   </div>
-  <button class="fab" data-go="#/editar/nueva">${icon('plus')}Nueva receta</button>
   ${tabbarHTML('home')}`;
 
   const results = $('#results', app);
@@ -820,6 +818,7 @@ function homeResults(recipes) {
     const hero = r.id === UI.lastRecipeId;
     return `<button class="card" data-go="#/receta/${r.id}" ${hero ? 'data-hero="1"' : ''}>
       ${photoHTML(r.coverImageId, { alt: r.name, hero })}
+      ${r.category ? `<p class="card-kicker">${esc(r.category)}</p>` : ''}
       <h3 class="card-name serif">${esc(r.name || 'Sin nombre')}</h3>
       <div class="card-meta meta">
         ${v.minutes ? `<span>${icon('clock', 'ic-sm')}${formatMinutes(v.minutes)}</span>` : ''}
@@ -873,15 +872,25 @@ async function RecipeView(app, id, params) {
     if (!version.ingredients.length) return `<p class="muted-empty">Esta versión no tiene ingredientes.</p>`;
     const factor = servings / (version.servings || 1);
     const checks = checksFor(version.id);
-    return `<ul class="ingredients">${version.ingredients.map((i) => {
+    return `<ul class="menu-ings">${version.ingredients.map((i) => {
       const q = i.qty == null ? null : (NO_SCALE_UNITS.has(i.unit) ? i.qty : i.qty * factor);
       const qty = qtyLabel(q, i.unit);
       const done = checks.has(i.id);
       const sub = i.recipeId && allById.get(i.recipeId);
-      return `<li class="ing ${done ? 'is-done' : ''} ${sub ? 'has-link' : ''}" data-check="${i.id}" role="checkbox" aria-checked="${done}" tabindex="0">
-        <span class="tick">${icon('check', 'ic-sm')}</span><span class="qty">${esc(qty)}</span><span class="name">${esc(i.name)}</span>
-        ${sub ? `<button class="ing-open" data-open="${sub.id}" aria-label="Ver la receta de ${esc(sub.name)}">${icon('book-open', 'ic-sm')}Receta</button>` : ''}</li>`;
-    }).join('')}</ul>`;
+      return `<li class="menu-ing ${done ? 'is-done' : ''}" data-check="${i.id}" role="checkbox" aria-checked="${done}" tabindex="0">
+        <span class="name">${esc(i.name)}</span>
+        ${sub ? `<button class="ing-open" data-open="${sub.id}" aria-label="Ver la receta de ${esc(sub.name)}">${icon('book-open', 'ic-sm')}Receta</button>` : ''}
+        <span class="leader" aria-hidden="true"></span><span class="qty">${esc(qty)}</span></li>`;
+    }).join('')}</ul>
+    <p class="hint ing-hint">Toca un ingrediente para tacharlo.</p>`;
+  }
+
+  function statsHTML() {
+    const stat = (n, label) => `<div class="stat"><span class="stat-n serif">${n}</span><span class="stat-l">${label}</span></div>`;
+    const steps = version.prep.length + version.cook.length;
+    const m = version.minutes || 0;
+    const time = !m ? stat('—', 'minutos') : m < 60 ? stat(m, 'minutos') : stat(formatMinutes(m).replace(' min', '′').replace(' h', 'h'), 'tiempo');
+    return `<div class="stats">${time}${stat(version.servings || '—', (version.servings || 0) === 1 ? 'ración' : 'raciones')}${stat(steps || '—', steps === 1 ? 'paso' : 'pasos')}</div>`;
   }
 
   function stepsHTML() {
@@ -891,7 +900,7 @@ async function RecipeView(app, id, params) {
     return `<ol class="steps">${steps.map((s, n) => {
       const done = checks.has(s.id);
       return `<li class="step ${done ? 'is-done' : ''}" data-check="${s.id}" role="checkbox" aria-checked="${done}" tabindex="0">
-        <span class="step-num">${done ? icon('check', 'ic-sm') : n + 1}</span>
+        <span class="step-num serif">${String(n + 1).padStart(2, '0')}</span>
         <div><p class="step-text">${esc(s.text)}</p>
           ${s.imageId && Images.cached(s.imageId) ? photoHTML(s.imageId, { natural: true }) : ''}
           ${s.timerMin ? `<span class="step-timer">${icon('timer', 'ic-sm')}${formatMinutes(s.timerMin)}</span>` : ''}</div></li>`;
@@ -913,18 +922,16 @@ async function RecipeView(app, id, params) {
         <div class="recipe-aside">
           <section class="recipe-hero">
             ${photoHTML(recipe.coverImageId, { alt: recipe.name, hero: true })}
+            ${recipe.category ? `<p class="recipe-kicker">${esc(recipe.category)}</p>` : ''}
             <h1 class="recipe-name serif">${esc(recipe.name || 'Sin nombre')}</h1>
-            <div class="meta">
-              ${version.minutes ? `<span>${icon('clock', 'ic-sm')}${formatMinutes(version.minutes)}</span>` : ''}
-              ${recipe.category ? `<span>${esc(recipe.category)}</span>` : ''}
-            </div>
+            ${statsHTML()}
           </section>
         </div>
         <div>
-          <section class="block" aria-label="Versiones">
-            <div class="chips">
+          <section class="block versions-block" aria-label="Versiones">
+            <div class="chips text-tabs">
               ${recipe.versions.map((v) => `<button class="chip ${v.id === version.id ? 'is-on' : ''}" data-version="${v.id}" aria-pressed="${v.id === version.id}">${esc(v.name)}</button>`).join('')}
-              <button class="chip chip-add" data-act="new-version">${icon('plus', 'ic-sm')}Versión</button>
+              <button class="chip text-tab-add" data-act="new-version">${icon('plus', 'ic-sm')}Versión</button>
             </div>
           </section>
           <section class="block">
@@ -1028,8 +1035,7 @@ async function RecipeView(app, id, params) {
     const done = checks.has(key);
     el.classList.toggle('is-done', done);
     el.setAttribute('aria-checked', String(done));
-    const num = el.querySelector('.step-num');
-    if (num) num.innerHTML = done ? icon('check', 'ic-sm') : String([...el.parentElement.children].indexOf(el) + 1);
+
   }
 
   const onKey = (e) => { if ((e.key === ' ' || e.key === 'Enter') && e.target.matches('[data-check]')) { e.preventDefault(); toggleCheck(e.target); } };
@@ -1681,9 +1687,11 @@ async function CookView(app, id, params) {
 function tabbarHTML(active) {
   const tab = (href, ic, label, key) =>
     `<a class="tab ${active === key ? 'is-on' : ''}" href="${href}" ${active === key ? 'aria-current="page"' : ''}>${icon(ic)}<span>${label}</span></a>`;
-  return `<nav class="tabbar" aria-label="Secciones">
-    ${tab('#/', 'book-open', 'Recetas', 'home')}${tab('#/menu', 'calendar-days', 'Menú', 'menu')}${tab('#/compra', 'shopping-cart', 'Compra', 'shop')}
-  </nav>`;
+  return `<nav class="tabbar" aria-label="Secciones"><div class="tabbar-pill">
+    ${tab('#/', 'book-open', 'Recetas', 'home')}${tab('#/menu', 'calendar-days', 'Menú', 'menu')}
+    <a class="tab-add" href="#/editar/nueva" aria-label="Nueva receta">${icon('plus')}</a>
+    ${tab('#/compra', 'shopping-cart', 'Compra', 'shop')}${tab('#/ajustes', 'settings-2', 'Ajustes', 'settings')}
+  </div></nav>`;
 }
 
 /** Miniatura redonda para listas (menú, compra, selector). */
@@ -2055,12 +2063,8 @@ async function SettingsView(app) {
   let canShare = false;
   try { canShare = !!navigator.canShare?.({ files: [new File(['x'], 'prueba.zip', { type: 'application/zip' })] }); } catch { /* */ }
 
-  app.innerHTML = `<div class="page"><div class="settings">
-    <div class="topbar">
-      <button class="icon-btn" data-act="back" aria-label="Volver">${icon('arrow-left')}</button>
-      <span class="grow"></span>
-    </div>
-    <h1 class="serif">Ajustes</h1>
+  app.innerHTML = `<div class="page has-tabbar"><div class="settings">
+    <h1 class="serif" style="margin-top:24px">Ajustes</h1>
 
     <section class="panel">
       <h2 class="serif">Sincronización con Google Drive</h2>
@@ -2114,9 +2118,10 @@ async function SettingsView(app) {
 
     <section class="panel">
       <h2 class="serif">Acerca de</h2>
-      <p>Recetario ${APP_VERSION}. Funciona sin conexión. ${driveOn ? 'Tus recetas se guardan en este dispositivo y se sincronizan con tu Google Drive.' : 'Todo se guarda solo en este dispositivo.'}</p>
+      <p>Recetario del chef JJ ${APP_VERSION}. Funciona sin conexión. ${driveOn ? 'Tus recetas se guardan en este dispositivo y se sincronizan con tu Google Drive.' : 'Todo se guarda solo en este dispositivo.'}</p>
     </section>
-  </div></div>`;
+  </div></div>
+  ${tabbarHTML('settings')}`;
 
   const onClick = async (e) => {
     const ce = e.target.closest('[data-cat-edit]');
