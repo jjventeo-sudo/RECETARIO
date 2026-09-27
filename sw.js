@@ -1,6 +1,6 @@
 /* Service worker: guarda la app para que funcione sin conexión.
    Al publicar cambios, sube el número de CACHE para que los móviles se actualicen. */
-const CACHE = 'recetario-v1.8.1';
+const CACHE = 'recetario-v1.8.2';
 const ASSETS = [
   './',
   './index.html',
@@ -16,7 +16,9 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
+  // cache: 'reload' obliga a descargar los archivos nuevos de GitHub y no reutilizar
+  // copias antiguas que el navegador tuviera guardadas unos minutos.
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))));
 });
 
 self.addEventListener('activate', (event) => {

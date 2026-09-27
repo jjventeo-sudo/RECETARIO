@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.8.2';
 
 /* =========================================================================
    1. Utilidades
@@ -874,9 +874,9 @@ const Prefs = {
   apply() { document.documentElement.classList.toggle('grain', !!this.grain); },
 };
 
-/* Movimiento de la portada: aparecer al entrar en pantalla y carrusel (los platos no giran) */
+/* Movimiento de la portada: las recetas aparecen con un fundido al entrar en pantalla (nada gira) */
 const Motion = (() => {
-  let io = null, onScroll = null, carousel = null, onCar = null;
+  let io = null;
   const still = () => reducedMotion();
   function bind(root) {
     unbind();
@@ -886,25 +886,9 @@ const Motion = (() => {
       io = new IntersectionObserver((es) => es.forEach((en) => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } }), { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
       els.forEach((e) => io.observe(e));
     }
-    carousel = $('#carousel', root);
-    if (carousel) {
-      const dots = $$('#dots i', root);
-      onCar = () => requestAnimationFrame(() => {
-        if (!carousel) return;
-        const r = carousel.getBoundingClientRect(), c = r.left + r.width / 2;
-        let best = 0, bd = Infinity;
-        [...carousel.children].forEach((el, i) => { const b = el.getBoundingClientRect(); const d = Math.abs(b.left + b.width / 2 - c); if (d < bd) { bd = d; best = i; } });
-        [...carousel.children].forEach((el, i) => el.classList.toggle('on', i === best));
-        dots.forEach((d, i) => d.classList.toggle('on', i === best));
-      });
-      carousel.addEventListener('scroll', onCar, { passive: true });
-    }
   }
   function unbind() {
     io?.disconnect(); io = null;
-    if (onScroll) removeEventListener('scroll', onScroll);
-    if (carousel && onCar) carousel.removeEventListener('scroll', onCar);
-    onScroll = onCar = carousel = null;
   }
   return { bind, unbind };
 })();
@@ -1046,12 +1030,12 @@ function homeResults(recipes, catOrder) {
     return `<p class="muted-empty" style="margin-top:28px">${q ? `No hay recetas con “${esc(q)}”.` : UI.homeTime ? 'Ninguna receta entra en ese tiempo. Recuerda poner el tiempo total al editar cada receta.' : 'No hay recetas en este filtro.'}</p>`;
   }
 
-  const card = (r, i) => {
+  const card = (r, i, showCat = true) => {
     const v = r.versions[0];
     const hero = r.id === UI.lastRecipeId;
     return `<button class="card reveal" style="--d:${(i % 2) * 110}ms" data-go="#/receta/${r.id}" ${hero ? 'data-hero="1"' : ''}>
       <div class="plate-wrap">${photoHTML(r.coverImageId, { alt: r.name, hero })}</div>
-      ${r.category ? `<p class="card-kicker">${esc(r.category)}</p>` : ''}
+      ${r.category && showCat ? `<p class="card-kicker">${esc(r.category)}</p>` : ''}
       <h3 class="card-name serif">${esc(r.name || 'Sin nombre')}</h3>
       <div class="card-meta meta">
         ${v.minutes ? `<span>${icon('clock', 'ic-sm')}${formatMinutes(v.minutes)}</span>` : ''}
@@ -1064,25 +1048,7 @@ function homeResults(recipes, catOrder) {
   const plain = !q && UI.homeFilter === 'all' && !UI.homeTime;
   if (!plain) return `<div style="height:14px"></div><div class="grid">${list.map(card).join('')}</div>`;
 
-  // "La carta de hoy": platos con foto, primero favoritas y las últimas cocinadas
-  const withPhoto = list.filter((r) => r.coverImageId && Images.cached(r.coverImageId));
-  const pick = [...withPhoto].sort((a, b) => (b.favorite - a.favorite) || ((b.lastCookedAt || 0) - (a.lastCookedAt || 0)) || (b.updatedAt - a.updatedAt)).slice(0, 6);
   let out = '';
-  if (pick.length >= 2) {
-    out += `<section class="carta" aria-label="La carta de hoy">
-      <div class="sec-head reveal"><h2 class="serif">La carta de hoy</h2></div>
-      <div class="carousel" id="carousel">${pick.map((r, i) => {
-        const v = r.versions[0];
-        return `<button class="dish ${i === 0 ? 'on' : ''}" data-go="#/receta/${r.id}">
-          <div class="plate-wrap">${photoHTML(r.coverImageId, { alt: r.name })}</div>
-          ${r.category ? `<span class="card-kicker">${esc(r.category)}</span>` : ''}
-          <span class="dish-name serif">${esc(r.name)}</span>
-          ${v.minutes ? `<span class="dish-meta">${formatMinutes(v.minutes)}</span>` : ''}
-        </button>`;
-      }).join('')}</div>
-      <div class="dots" id="dots" aria-hidden="true">${pick.map((_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>
-    </section>`;
-  }
 
   // Todas las recetas agrupadas por categoría, en el orden que elegiste en Ajustes
   const OTHER = 'Otras recetas';
@@ -1093,7 +1059,7 @@ function homeResults(recipes, catOrder) {
   const byName = (a, b) => (b.favorite - a.favorite) || a.name.localeCompare(b.name, 'es');
   out += groups.map(([c, rs]) => `<section class="cat-group">
       <div class="sec-head reveal"><h2 class="serif">${esc(c)}</h2><span>${rs.length}</span></div>
-      <div class="grid">${rs.sort(byName).map(card).join('')}</div>
+      <div class="grid">${rs.sort(byName).map((r, i) => card(r, i, false)).join('')}</div>
     </section>`).join('');
   return out;
 }

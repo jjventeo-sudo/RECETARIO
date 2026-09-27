@@ -834,20 +834,20 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
 /* Tipografía de carta: títulos grandes con trazo fino, versalitas espaciadas en dorado */
 .home-title { font-weight: 300; letter-spacing: -0.025em; }
 .recipe-name { font-weight: 300; letter-spacing: -0.02em; }
-.card-kicker, .recipe-kicker, .stat-l, .shop-sec, .dish .card-kicker {
+.card-kicker, .recipe-kicker, .stat-l, .shop-sec {
   text-transform: uppercase; letter-spacing: .22em; font-size: 10.5px; font-weight: 500;
 }
 .recipe-kicker { font-size: 11.5px; }
 
 /* Luz de pase: un halo cálido muy tenue detrás de cada plato */
-.card .float, .dish .float, .recipe-hero .float { position: relative; }
-.card .float::before, .dish .float::before, .recipe-hero .float::before {
+.card .float, .recipe-hero .float { position: relative; }
+.card .float::before, .recipe-hero .float::before {
   content: ""; position: absolute; inset: 2%; border-radius: 50%; pointer-events: none;
   background: radial-gradient(closest-side, rgba(232, 163, 61, .13), rgba(232, 163, 61, .04) 55%, transparent 74%);
   transition: opacity .6s var(--ease);
 }
 .recipe-hero .float::before { inset: -8%; background: radial-gradient(closest-side, rgba(232, 163, 61, .18), rgba(232, 163, 61, .05) 55%, transparent 76%); }
-.card .float img, .dish .float img, .recipe-hero .float img { position: relative; will-change: transform; }
+.card .float img, .recipe-hero .float img { position: relative; }
 
 /* Aparecer al entrar en pantalla */
 .reveal { opacity: 0; transform: translateY(22px); transition: opacity .9s var(--ease), transform .9s var(--ease); transition-delay: var(--d, 0ms); }
@@ -859,30 +859,6 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
 .sec-head span { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .sec-head::after { content: ""; flex: 1; height: 1px; align-self: center; background: linear-gradient(90deg, rgba(232, 163, 61, .45), transparent); }
 .cat-group .grid { margin-top: 4px; }
-
-/* La carta de hoy: carrusel de platos grandes */
-.carta { margin: 0 calc(var(--pad) * -1); }
-.carta .sec-head { padding: 0 var(--pad); }
-.carousel {
-  display: flex; gap: 4px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none;
-  padding: 4px 17% 6px;
-}
-.carousel::-webkit-scrollbar { display: none; }
-.dish {
-  flex: 0 0 66%; scroll-snap-align: center; display: grid; justify-items: center; text-align: center;
-  border: 0; background: none; padding: 0; opacity: .32; transform: scale(.84);
-  transition: transform .55s var(--ease), opacity .55s var(--ease);
-}
-.dish.on { opacity: 1; transform: none; }
-.dish:not(.on) .float::before { opacity: 0; }
-.dish .float { width: 100%; }
-.dish .card-kicker { margin-top: 6px; }
-.dish-name { margin-top: 6px; font-size: 25px; line-height: 1.1; }
-.dish-meta { margin-top: 6px; font-size: 12px; color: var(--text-3); letter-spacing: .04em; }
-.dots { display: flex; justify-content: center; gap: 6px; margin-top: 12px; }
-.dots i { width: 5px; height: 5px; border-radius: 3px; background: #3a342e; transition: all .4s var(--ease); }
-.dots i.on { width: 18px; background: var(--accent); }
-@media (min-width: 720px) { .dish { flex-basis: 40%; } .carousel { padding: 4px 30% 6px; } }
 
 /* Receta: adorno dorado y ficha de cuatro datos */
 .ornament { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 16px; }
