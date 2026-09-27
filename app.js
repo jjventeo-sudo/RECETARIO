@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 
 /* =========================================================================
    1. Utilidades
@@ -869,12 +869,12 @@ const Router = (() => {
 
 /* Preferencias de apariencia (se guardan en este dispositivo) */
 const Prefs = {
-  intro: true, spin: true, grain: true,
-  async load() { for (const k of ['intro', 'spin', 'grain']) this[k] = await Meta.get(`pref:${k}`, true); this.apply(); },
+  intro: true, grain: true,
+  async load() { for (const k of ['intro', 'grain']) this[k] = await Meta.get(`pref:${k}`, true); this.apply(); },
   apply() { document.documentElement.classList.toggle('grain', !!this.grain); },
 };
 
-/* Movimiento de la portada: aparecer al entrar en pantalla, carrusel y giro suave de los platos */
+/* Movimiento de la portada: aparecer al entrar en pantalla y carrusel (los platos no giran) */
 const Motion = (() => {
   let io = null, onScroll = null, carousel = null, onCar = null;
   const still = () => reducedMotion();
@@ -896,17 +896,8 @@ const Motion = (() => {
         [...carousel.children].forEach((el, i) => { const b = el.getBoundingClientRect(); const d = Math.abs(b.left + b.width / 2 - c); if (d < bd) { bd = d; best = i; } });
         [...carousel.children].forEach((el, i) => el.classList.toggle('on', i === best));
         dots.forEach((d, i) => d.classList.toggle('on', i === best));
-        if (Prefs.spin && !still()) $$('.spin img', carousel).forEach((img, i) => { img.style.transform = `rotate(${carousel.scrollLeft * 0.08 + i * 23}deg)`; });
       });
       carousel.addEventListener('scroll', onCar, { passive: true });
-    }
-    if (Prefs.spin && !still()) {
-      onScroll = () => requestAnimationFrame(() => {
-        const y = scrollY;
-        $$('.cat-group .spin img', root).forEach((img, i) => { img.style.transform = `rotate(${(y * 0.05 + i * 31) % 360}deg)`; });
-      });
-      addEventListener('scroll', onScroll, { passive: true });
-      onScroll();
     }
   }
   function unbind() {
@@ -1059,7 +1050,7 @@ function homeResults(recipes, catOrder) {
     const v = r.versions[0];
     const hero = r.id === UI.lastRecipeId;
     return `<button class="card reveal" style="--d:${(i % 2) * 110}ms" data-go="#/receta/${r.id}" ${hero ? 'data-hero="1"' : ''}>
-      <div class="spin">${photoHTML(r.coverImageId, { alt: r.name, hero })}</div>
+      <div class="plate-wrap">${photoHTML(r.coverImageId, { alt: r.name, hero })}</div>
       ${r.category ? `<p class="card-kicker">${esc(r.category)}</p>` : ''}
       <h3 class="card-name serif">${esc(r.name || 'Sin nombre')}</h3>
       <div class="card-meta meta">
@@ -1083,7 +1074,7 @@ function homeResults(recipes, catOrder) {
       <div class="carousel" id="carousel">${pick.map((r, i) => {
         const v = r.versions[0];
         return `<button class="dish ${i === 0 ? 'on' : ''}" data-go="#/receta/${r.id}">
-          <div class="spin">${photoHTML(r.coverImageId, { alt: r.name })}</div>
+          <div class="plate-wrap">${photoHTML(r.coverImageId, { alt: r.name })}</div>
           ${r.category ? `<span class="card-kicker">${esc(r.category)}</span>` : ''}
           <span class="dish-name serif">${esc(r.name)}</span>
           ${v.minutes ? `<span class="dish-meta">${formatMinutes(v.minutes)}</span>` : ''}
@@ -2619,7 +2610,6 @@ async function SettingsView(app) {
     <section class="panel">
       <h2 class="serif">Apariencia</h2>
       <label class="switch"><input type="checkbox" data-pref="intro" ${Prefs.intro ? 'checked' : ''}>Apertura animada al abrir la app</label>
-      <label class="switch"><input type="checkbox" data-pref="spin" ${Prefs.spin ? 'checked' : ''}>Platos que giran al desplazarte</label>
       <label class="switch"><input type="checkbox" data-pref="grain" ${Prefs.grain ? 'checked' : ''}>Textura de papel sobre el negro</label>
     </section>
 

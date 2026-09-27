@@ -848,7 +848,6 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
 }
 .recipe-hero .float::before { inset: -8%; background: radial-gradient(closest-side, rgba(232, 163, 61, .18), rgba(232, 163, 61, .05) 55%, transparent 76%); }
 .card .float img, .dish .float img, .recipe-hero .float img { position: relative; will-change: transform; }
-.spin img { transition: transform .15s linear; }
 
 /* Aparecer al entrar en pantalla */
 .reveal { opacity: 0; transform: translateY(22px); transition: opacity .9s var(--ease), transform .9s var(--ease); transition-delay: var(--d, 0ms); }
@@ -893,7 +892,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
 .stats.four { grid-template-columns: repeat(4, 1fr); width: min(100%, 480px); }
 .stat-n { font-weight: 300; }
 .recipe-hero .float img { animation: plateIn 1s var(--ease) both; }
-@keyframes plateIn { from { opacity: 0; transform: scale(.82) rotate(-28deg); } }
+@keyframes plateIn { from { opacity: 0; transform: scale(.9); } }
 
 /* Tachado dorado que se dibuja al marcar un ingrediente */
 .menu-ing .name { position: relative; }
