@@ -385,23 +385,28 @@ button { cursor: pointer; }
 
 .ing-row {
   display: grid; gap: 8px; align-items: center;
-  grid-template-columns: 84px 124px 1fr 44px 44px;
-  grid-template-areas: "qty unit name lnk del" "frac frac frac frac frac" "sub sub sub sub sub";
+  grid-template-columns: 84px 124px 1fr 40px 40px 44px 44px;
+  grid-template-areas: "qty unit name up down lnk del" "frac frac frac frac frac frac frac" "sub sub sub sub sub sub sub";
 }
 .ing-row [data-f="qty"] { grid-area: qty; }
 .ing-row [data-f="unit"] { grid-area: unit; }
 .ing-row [data-f="name"] { grid-area: name; }
 .ing-row [data-act="link-ing"] { grid-area: lnk; }
 .ing-row [data-act="del-ing"] { grid-area: del; }
+.ing-row .mv-up { grid-area: up; }
+.ing-row .mv-down { grid-area: down; }
 .ing-row > .icon-btn { width: 44px; height: 44px; color: var(--text-3); }
+.ing-row > .mv-up, .ing-row > .mv-down { width: 40px; }
 .ing-row > .icon-btn.is-linked { color: var(--accent); }
-/* En móvil: el nombre arriba a lo ancho, cantidad y unidad debajo */
+.ing-row:first-child .mv-up, .ing-row:last-of-type .mv-down { opacity: .3; }
+/* En móvil: el nombre arriba a lo ancho, cantidad, unidad y botones debajo */
 @media (max-width: 560px) {
   .ing-row {
-    grid-template-columns: 96px 1fr 44px;
-    grid-template-areas: "name name del" "qty unit lnk" "frac frac frac" "sub sub sub";
+    grid-template-columns: 80px 1fr 36px 36px 40px;
+    grid-template-areas: "name name name name del" "qty unit up down lnk" "frac frac frac frac frac" "sub sub sub sub sub";
     padding-bottom: 12px; border-bottom: 1px solid var(--line);
   }
+  .ing-row > .mv-up, .ing-row > .mv-down { width: 36px; height: 40px; }
 }
 .frac-bar { grid-area: frac; display: none; gap: 6px; }
 .ing-row:has([data-f="qty"]:focus) .frac-bar { display: flex; }
@@ -786,3 +791,50 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
 
 /* Barra superior de la receta: fondo que funde a negro para que el texto no se cruce con los botones */
 .recipe-top { background: linear-gradient(to bottom, #000 45%, rgba(0, 0, 0, 0)); }
+
+/* ---------- Botón pequeño ---------- */
+.btn-sm { min-height: 36px; padding: 0 12px; font-size: 13px; gap: 4px; border-radius: 12px; }
+
+/* ---------- Nutrición ---------- */
+.nutri { display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: center; margin-top: 4px; }
+.nutri-kcal { display: grid; justify-items: center; min-width: 96px; }
+.nutri-kcal .serif { font-size: 46px; line-height: 1; }
+.nutri-kcal span:last-child { font-size: 13px; color: var(--text-3); }
+.macros { display: grid; gap: 10px; }
+.macro { display: grid; grid-template-columns: 70px 1fr 52px; align-items: center; gap: 10px; font-size: 14px; }
+.macro-l { color: var(--text-2); }
+.macro-v { text-align: right; font-variant-numeric: tabular-nums; }
+.macro-bar { height: 6px; border-radius: 3px; background: var(--s2); overflow: hidden; }
+.macro-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.nutri-note { display: flex; gap: 6px; align-items: flex-start; margin-top: 12px; font-size: 13px; }
+.nd-list { list-style: none; margin: 0 0 12px; padding: 0; }
+.nd-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--s2); }
+.nd-name { font-size: 15px; }
+.nd-q { font-size: 13px; color: var(--accent); }
+.nd-note { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.nd-note .warn { color: var(--danger); }
+.nd-right { display: grid; justify-items: end; gap: 4px; font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.day-kcal { display: flex; align-items: center; gap: 6px; margin: -2px 0 2px; font-size: 13px; color: var(--text-2); }
+.day-kcal .ic { color: var(--accent); }
+.day-kcal span { color: var(--text-3); }
+
+/* ---------- Filtro de tiempo, pegar receta, despensa ---------- */
+.time-tabs { gap: 18px; margin-top: -6px; }
+.time-tabs .chip { font-size: 13px; min-height: 34px; }
+.paste-btn { justify-self: center; color: var(--accent); border-color: #4a3818; }
+.shop-item { grid-template-columns: 28px 1fr auto auto; }
+.pantry-btn { opacity: .55; }
+.pantry-btn:hover, .pantry-btn:focus-visible { opacity: 1; }
+
+/* ---------- Batch cooking ---------- */
+.batch { max-width: 760px; margin: 0 auto; }
+.batch-shared { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; min-height: 52px; border-bottom: 1px solid var(--line); }
+.batch-meal { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.batch-name { margin: 2px 0 8px; font-size: 20px; font-weight: 400; cursor: pointer; }
+.batch-name span { font-family: var(--sans); font-size: 13px; color: var(--text-3); margin-left: 6px; }
+.batch-steps { list-style: none; margin: 0; padding: 0; }
+.batch-step { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; padding: 8px 0; cursor: pointer; font-size: 15px; }
+.batch-step .tick { width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; border: 1.5px solid var(--s3); display: grid; place-items: center; color: transparent; }
+.batch-step.is-done { opacity: .45; }
+.batch-step.is-done .tick { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.batch-step.is-done span:last-child { text-decoration: line-through; }
