@@ -934,3 +934,33 @@ html.grain body::after {
   .intro { display: none; }
   html.grain body::after { display: none; }
 }
+
+/* =====================================================================
+   1.9 · Pasos con título, lista y etiqueta de fuego · subtítulo del plato
+   ===================================================================== */
+.step-text { white-space: normal; }
+.step-title { margin: 0 0 4px; font-size: 19px; line-height: 1.25; color: var(--text); }
+.step-line { margin: 0 0 6px; font-size: 16px; line-height: 1.6; }
+.step-list { margin: 2px 0 6px; padding: 0; list-style: none; }
+.step-list li { position: relative; padding-left: 18px; margin: 0 0 6px; font-size: 16px; line-height: 1.55; }
+.step-list li::before { content: ""; position: absolute; left: 2px; top: .68em; width: 5px; height: 5px; transform: rotate(45deg); background: var(--accent); }
+.step-tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 2px; }
+.step-tag {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px;
+  border-radius: 999px; border: 1px solid rgba(232, 163, 61, .35); color: var(--accent); font-size: 13px;
+}
+.step.is-done .step-title, .step.is-done .step-line, .step.is-done .step-list li { color: var(--text-3); }
+
+.cook-title { margin: 0; font-size: clamp(28px, 7vw, 40px); line-height: 1.15; font-weight: 400; }
+.cook-power {
+  justify-self: start; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 16px;
+  border-radius: 999px; border: 1px solid rgba(232, 163, 61, .45); color: var(--accent); font-size: 17px;
+}
+.cook-power .ic { width: 20px; height: 20px; }
+.cook-body-text .cook-line, .cook-body-text .step-list li { font-size: clamp(18px, 4.6vw, 22px); line-height: 1.5; }
+.cook-body-text .cook-line { margin: 0 0 10px; }
+.cook-body-text .step-list li { margin-bottom: 10px; padding-left: 22px; }
+.cook-body-text .step-list li::before { width: 6px; height: 6px; top: .62em; }
+.cook-body-text.solo .cook-line { font-family: var(--serif); font-size: clamp(24px, 6vw, 34px); line-height: 1.28; }
+
+.recipe-sub { margin: 6px 0 0; font-size: 19px; font-style: italic; color: var(--text-2); max-width: 26ch; text-wrap: balance; }

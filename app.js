@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.8.2';
+const APP_VERSION = '1.9.0';
 
 /* =========================================================================
    1. Utilidades
@@ -122,6 +122,45 @@ function formatBytes(b) {
   if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
   if (b < 1024 ** 3) return `${nf.format(Math.round(b / 1024 / 1024 * 10) / 10)} MB`;
   return `${nf.format(Math.round(b / 1024 ** 3 * 10) / 10)} GB`;
+}
+
+/**
+ * Lee cómo escribes los pasos y los separa en partes:
+ *  - Título: la primera línea si termina en ":" ("La carne:", "Montar:")
+ *  - Fuego: "Potencia al 7" se convierte en una etiqueta aparte
+ *  - Lista: las líneas que empiezan por "-", "•", "○" o "*"
+ */
+function parseStep(text) {
+  let t = String(text || '').replace(/[\u200B-\u200D\uFEFF]/g, '');
+  let power = null;
+  t = t.replace(/[-–•○*]?\s*potencia\s*(?:al|a|de)?\s*(\d{1,2})\s*[.:]?/gi, (_, n) => { power = power || n; return ''; });
+  const lines = t.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  let title = '';
+  if (lines.length) {
+    const m = lines[0].match(/^(.{2,70}?)\s*:\s*(.*)$/);
+    if (m && !/^\d/.test(m[1])) {
+      title = m[1].trim();
+      if (m[2].trim()) lines[0] = m[2].trim(); else lines.shift();
+    }
+  }
+  const body = lines.map((l) => {
+    const b = l.match(/^[-–•○*]\s*(.*)$/);
+    return b ? { bullet: true, text: b[1].trim() } : { bullet: false, text: l };
+  }).filter((l) => l.text);
+  return { title, power, body };
+}
+
+/** HTML de un paso ya separado en partes. */
+function stepBodyHTML(p, { big = false } = {}) {
+  const list = [];
+  let html = '';
+  const flush = () => { if (list.length) { html += `<ul class="step-list">${list.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`; list.length = 0; } };
+  for (const l of p.body) {
+    if (l.bullet) list.push(l.text);
+    else { flush(); html += `<p class="${big ? 'cook-line' : 'step-line'}">${esc(l.text)}</p>`; }
+  }
+  flush();
+  return html;
 }
 
 /* =========================================================================
@@ -499,7 +538,7 @@ const Categories = {
    Los pesos por unidad ("1 pimiento ≈ 150 g") son medias orientativas.
    Formato de cada fila: [nombres, kcal, proteína, hidratos, grasa, gramos por unidad] */
 
-const NUTRI_ROWS = [[["arroz","arroz bomba","arroz redondo","arroz largo","arroz blanco"],360.0,6.6,79.3,0.6,null],[["arroz integral"],367.0,7.5,76.3,3.2,null],[["pasta","espaguetis","espagueti","macarrones","fideos","tallarines"],371.0,13.0,74.7,1.5,null],[["pasta integral"],352.0,13.9,73.4,2.9,null],[["harina","harina de trigo"],364.0,10.3,76.3,1.0,null],[["harina de avena","avena","copos de avena"],379.0,13.2,67.7,6.5,null],[["pan","pan de molde","barra de pan","baguette"],266.0,8.9,49.4,3.3,30],[["pan integral"],278.0,8.4,51.4,5.4,30],[["pan rallado"],395.0,13.4,72.0,5.3,null],[["azucar","azúcar"],387.0,0,100.0,0,null],[["miel"],304.0,0.3,82.4,0,null],[["aceite","aceite de oliva","aceite de oliva virgen extra","aove"],884.0,0,0,100.0,null],[["aceite de girasol"],884.0,0,0,100.0,null],[["mantequilla"],717.0,0.9,0.1,81.1,null],[["sal"],0,0,0,0,null],[["pimienta","pimienta negra"],251.0,10.4,64.0,3.3,null],[["pimenton","pimentón","pimentón dulce"],282.0,14.1,54.0,12.9,null],[["comino"],375.0,17.8,44.2,22.3,null],[["canela"],247.0,4.0,80.6,1.2,null],[["oregano","orégano"],265.0,9.0,68.9,4.3,null],[["azafran","azafrán"],310.0,11.4,65.4,5.9,null],[["curry"],325.0,14.3,55.8,14.0,null],[["vinagre"],21.0,0,0.9,0,null],[["salsa de soja","soja"],53.0,8.1,4.9,0.6,null],[["mostaza"],60.0,3.7,5.8,3.3,null],[["mayonesa"],680.0,1.0,0.6,74.9,null],[["ketchup","kétchup"],101.0,1.0,27.4,0.1,null],[["tomate","tomates","tomate pera","tomate rama"],18.0,0.9,3.9,0.2,120],[["tomate triturado","tomate natural triturado"],32.0,1.6,7.3,0.3,null],[["tomate frito","salsa de tomate"],50.0,1.4,7.4,1.6,null],[["tomate cherry","tomates cherry"],18.0,0.9,3.9,0.2,15],[["cebolla","cebollas"],40.0,1.1,9.3,0.1,150],[["cebolleta","cebolletas"],32.0,1.8,7.3,0.2,30],[["ajo","ajos","diente de ajo"],149.0,6.4,33.1,0.5,5],[["pimiento","pimiento rojo"],26.0,1.0,6.0,0.3,150],[["pimiento verde"],20.0,0.9,4.6,0.2,150],[["pimiento amarillo"],27.0,1.0,6.3,0.2,150],[["patata","patatas"],77.0,2.1,17.5,0.1,170],[["boniato","batata"],86.0,1.6,20.1,0.1,180],[["zanahoria","zanahorias"],41.0,0.9,9.6,0.2,70],[["calabacin","calabacín","calabacines"],17.0,1.2,3.1,0.3,200],[["berenjena","berenjenas"],25.0,1.0,5.9,0.2,250],[["calabaza"],26.0,1.0,6.5,0.1,null],[["puerro","puerros"],61.0,1.5,14.2,0.3,90],[["lechuga"],17.0,1.2,3.3,0.3,300],[["espinacas","espinaca"],23.0,2.9,3.6,0.4,null],[["acelgas","acelga"],19.0,1.8,3.7,0.2,null],[["brocoli","brócoli"],34.0,2.8,6.6,0.4,300],[["coliflor"],25.0,1.9,5.0,0.3,500],[["col","repollo"],25.0,1.3,5.8,0.1,null],[["champiñones","champiñon","champinones","setas"],22.0,3.1,3.3,0.3,20],[["judias verdes","judías verdes"],31.0,1.8,7.0,0.2,null],[["guisantes"],81.0,5.4,14.5,0.4,null],[["pepino"],15.0,0.7,3.6,0.1,250],[["apio"],14.0,0.7,3.0,0.2,40],[["esparragos","espárragos","espárragos verdes"],20.0,2.2,3.9,0.1,16],[["alcachofa","alcachofas"],47.0,3.3,10.5,0.2,120],[["maiz","maíz"],86.0,3.3,18.7,1.4,null],[["aguacate","aguacates"],160.0,2.0,8.5,14.7,170],[["limon","limón","limones"],29.0,1.1,9.3,0.3,100],[["zumo de limon","zumo de limón"],22.0,0.4,6.9,0.2,null],[["lima"],30.0,0.7,10.5,0.2,65],[["naranja","naranjas"],47.0,0.9,11.8,0.1,180],[["manzana","manzanas"],52.0,0.3,13.8,0.2,180],[["pera","peras"],57.0,0.4,15.2,0.1,180],[["platano","plátano","platanos","plátanos","banana"],89.0,1.1,22.8,0.3,120],[["fresas","fresa"],32.0,0.7,7.7,0.3,12],[["arandanos","arándanos"],57.0,0.7,14.5,0.3,null],[["frambuesas"],52.0,1.2,11.9,0.7,null],[["uvas"],69.0,0.7,18.1,0.2,null],[["piña"],50.0,0.5,13.1,0.1,null],[["mango"],60.0,0.8,15.0,0.4,300],[["kiwi"],61.0,1.1,14.7,0.5,75],[["melon","melón"],34.0,0.8,8.2,0.2,null],[["sandia","sandía"],30.0,0.6,7.6,0.2,null],[["perejil"],36.0,3.0,6.3,0.8,null],[["cilantro"],23.0,2.1,3.7,0.5,null],[["albahaca"],23.0,3.2,2.7,0.6,null],[["jengibre"],80.0,1.8,17.8,0.8,null],[["huevo","huevos"],143.0,12.6,0.7,9.5,55],[["clara de huevo","claras","claras de huevo"],52.0,10.9,0.7,0.2,33],[["yema","yemas"],322.0,15.9,3.6,26.5,17],[["leche entera"],61.0,3.2,4.8,3.3,null],[["leche desnatada"],34.0,3.4,5.0,0.1,null],[["leche","leche semidesnatada"],46.0,3.3,4.8,1.6,null],[["bebida de almendras","leche de almendras"],15.0,0.4,1.3,1.0,null],[["yogur","yogur natural"],61.0,3.5,4.7,3.3,125],[["yogur griego","yogur griego natural"],97.0,9.0,4.0,5.0,125],[["yogur griego 0%","yogur 0%","yogur desnatado"],59.0,10.2,3.6,0.4,125],[["nata","nata para montar","nata liquida","nata líquida"],340.0,2.8,2.8,36.1,null],[["nata para cocinar","nata ligera","nata para cocinar ligera"],195.0,2.5,3.5,18.0,null],[["queso","queso curado","queso manchego"],392.0,35.8,3.2,25.0,null],[["queso rallado","parmesano"],420.0,28.4,13.9,27.8,null],[["queso fresco","queso de burgos"],138.0,11.4,5.1,7.9,null],[["mozzarella"],254.0,24.3,2.8,15.9,125],[["queso crema","queso untable"],350.0,6.2,5.5,34.4,null],[["requeson","requesón","queso cottage"],81.0,10.5,4.8,2.3,null],[["pollo","pechuga de pollo","pechugas de pollo"],120,22.5,0,2.6,200],[["muslo de pollo","contramuslo","contramuslos"],121.0,19.7,0,4.1,100],[["pavo","pechuga de pavo"],114.0,23.3,0,2.3,null],[["carne picada de pavo","pavo picado"],150.0,18.7,0,8.3,null],[["carne picada","carne picada de ternera","ternera picada"],215.0,18.6,0,15.0,null],[["ternera","filete de ternera"],173.0,22.2,0,8.7,null],[["cerdo","lomo de cerdo","lomo"],198.0,19.7,0,12.6,null],[["solomillo de cerdo"],109.0,21.0,0,2.2,null],[["bacon","panceta","beicon"],393.0,13.7,0,37.1,null],[["jamon serrano","jamón serrano","jamon","jamón"],164.0,16.6,3.6,8.8,null],[["jamon york","jamón york","jamón cocido"],107.0,16.9,0.7,4.0,null],[["chorizo"],296.0,13.6,3.8,25.1,null],[["salmon","salmón"],208.0,20.4,0,13.4,null],[["atun","atún","atún en lata","atun en lata"],86.0,19.4,0,1.0,null],[["merluza","bacalao","pescado blanco"],82.0,17.8,0,0.7,null],[["gambas","gamba","langostinos","langostino"],85.0,20.1,0,0.5,15],[["mejillones","mejillon","mejillón"],86.0,11.9,3.7,2.2,null],[["almejas","almeja"],86.0,14.7,3.6,1.0,null],[["calamar","calamares","sepia"],92.0,15.6,3.1,1.4,null],[["pulpo"],82.0,14.9,2.2,1.0,null],[["sardinas","sardina"],208.0,24.6,0,11.5,null],[["garbanzos","garbanzo"],378.0,20.5,63.0,6.0,null],[["garbanzos cocidos"],139.0,7.1,22.5,2.8,null],[["lentejas","lenteja"],352.0,24.6,63.4,1.1,null],[["alubias","judias blancas","judías blancas","alubias blancas"],333.0,23.4,60.3,0.9,null],[["alubias rojas"],333.0,23.6,60.0,0.8,null],[["tofu"],144.0,17.3,2.8,8.7,null],[["almendras","almendra"],579.0,21.2,21.6,49.9,null],[["nueces","nuez"],654.0,15.2,13.7,65.2,null],[["avellanas"],628.0,15.0,16.7,60.8,null],[["cacahuetes"],567.0,25.8,16.1,49.2,null],[["crema de cacahuete","mantequilla de cacahuete"],598.0,22.2,22.3,51.4,null],[["pipas","semillas de girasol"],584.0,20.8,20.0,51.5,null],[["chia","semillas de chia","semillas de chía"],486.0,16.5,42.1,30.7,null],[["sesamo","sésamo"],573.0,17.7,23.5,49.7,null],[["cacao","cacao en polvo","cacao puro"],228.0,19.6,57.9,13.7,null],[["chocolate negro","chocolate"],598.0,7.8,45.9,42.6,null],[["levadura"],325.0,40.4,41.2,7.6,null],[["levadura quimica","levadura química","polvo de hornear"],51.0,0.1,24.1,0,null],[["maicena","almidon de maiz","almidón de maíz"],381.0,0.3,91.3,0.1,null],[["caldo","caldo de pollo"],6.0,0.6,0.4,0.2,null],[["caldo de verduras"],5.0,0.2,0.9,0.1,null],[["fumet","fumet de pescado","caldo de pescado"],16.0,2.0,0.4,0.6,null],[["vino blanco","vino"],82.0,0.1,2.6,0,null],[["vino tinto"],85.0,0.1,2.6,0,null],[["cerveza"],43.0,0.5,3.6,0,null],[["agua"],0,0,0,0,null],[["proteina en polvo","proteína en polvo","whey"],352.0,78.1,6.3,1.6,null],[["aceitunas"],116.0,0.8,6.0,10.9,4],[["tortilla de trigo","wrap","tortillas de trigo"],306.0,8.2,49.4,8.0,45],[["quinoa","quinoa"],368.0,14.1,64.2,6.1,null],[["cuscus","cuscús"],376.0,12.8,77.4,0.6,null],[["pan de hamburguesa"],279.0,9.8,50.1,3.9,50],[["edulcorante","eritritol","stevia"],0,0,0,0,null],[["gelatina"],335.0,85.6,0,0.1,null],[["coco rallado"],660.0,6.9,23.7,64.5,null],[["leche de coco"],197.0,2.0,2.8,21.3,null]];
+const NUTRI_ROWS = [[["arroz","arroz bomba","arroz redondo","arroz largo","arroz blanco"],360.0,6.6,79.3,0.6,null],[["arroz integral"],367.0,7.5,76.3,3.2,null],[["pasta","espaguetis","espagueti","macarrones","fideos","tallarines"],371.0,13.0,74.7,1.5,null],[["pasta integral"],352.0,13.9,73.4,2.9,null],[["harina","harina de trigo"],364.0,10.3,76.3,1.0,null],[["harina de avena","avena","copos de avena"],379.0,13.2,67.7,6.5,null],[["pan","pan de molde","barra de pan","baguette"],266.0,8.9,49.4,3.3,30],[["pan integral"],278.0,8.4,51.4,5.4,30],[["pan rallado"],395.0,13.4,72.0,5.3,null],[["azucar","azúcar"],387.0,0,100.0,0,null],[["miel"],304.0,0.3,82.4,0,null],[["aceite","aceite de oliva","aceite de oliva virgen extra","aove"],884.0,0,0,100.0,null],[["aceite de girasol"],884.0,0,0,100.0,null],[["mantequilla"],717.0,0.9,0.1,81.1,null],[["sal"],0,0,0,0,null],[["pimienta","pimienta negra"],251.0,10.4,64.0,3.3,null],[["pimenton","pimentón","pimentón dulce"],282.0,14.1,54.0,12.9,null],[["comino"],375.0,17.8,44.2,22.3,null],[["canela"],247.0,4.0,80.6,1.2,null],[["oregano","orégano"],265.0,9.0,68.9,4.3,null],[["azafran","azafrán"],310.0,11.4,65.4,5.9,null],[["curry"],325.0,14.3,55.8,14.0,null],[["vinagre"],21.0,0,0.9,0,null],[["salsa de soja","soja"],53.0,8.1,4.9,0.6,null],[["mostaza"],60.0,3.7,5.8,3.3,null],[["mayonesa"],680.0,1.0,0.6,74.9,null],[["ketchup","kétchup"],101.0,1.0,27.4,0.1,null],[["tomate","tomates","tomate pera","tomate rama"],18.0,0.9,3.9,0.2,120],[["tomate triturado","tomate natural triturado"],32.0,1.6,7.3,0.3,null],[["tomate frito","salsa de tomate"],50.0,1.4,7.4,1.6,null],[["tomate cherry","tomates cherry"],18.0,0.9,3.9,0.2,15],[["cebolla","cebollas"],40.0,1.1,9.3,0.1,150],[["cebolleta","cebolletas"],32.0,1.8,7.3,0.2,30],[["ajo","ajos","diente de ajo"],149.0,6.4,33.1,0.5,5],[["pimiento","pimiento rojo"],26.0,1.0,6.0,0.3,150],[["pimiento verde"],20.0,0.9,4.6,0.2,150],[["pimiento amarillo"],27.0,1.0,6.3,0.2,150],[["patata","patatas"],77.0,2.1,17.5,0.1,170],[["boniato","batata"],86.0,1.6,20.1,0.1,180],[["zanahoria","zanahorias"],41.0,0.9,9.6,0.2,70],[["calabacin","calabacín","calabacines"],17.0,1.2,3.1,0.3,200],[["berenjena","berenjenas"],25.0,1.0,5.9,0.2,250],[["calabaza"],26.0,1.0,6.5,0.1,null],[["puerro","puerros"],61.0,1.5,14.2,0.3,90],[["lechuga"],17.0,1.2,3.3,0.3,300],[["espinacas","espinaca"],23.0,2.9,3.6,0.4,null],[["acelgas","acelga"],19.0,1.8,3.7,0.2,null],[["brocoli","brócoli"],34.0,2.8,6.6,0.4,300],[["coliflor"],25.0,1.9,5.0,0.3,500],[["col","repollo"],25.0,1.3,5.8,0.1,null],[["champiñones","champiñon","champinones","setas"],22.0,3.1,3.3,0.3,20],[["judias verdes","judías verdes"],31.0,1.8,7.0,0.2,null],[["guisantes"],81.0,5.4,14.5,0.4,null],[["pepino"],15.0,0.7,3.6,0.1,250],[["apio"],14.0,0.7,3.0,0.2,40],[["esparragos","espárragos","espárragos verdes"],20.0,2.2,3.9,0.1,16],[["alcachofa","alcachofas"],47.0,3.3,10.5,0.2,120],[["maiz","maíz"],86.0,3.3,18.7,1.4,null],[["aguacate","aguacates"],160.0,2.0,8.5,14.7,170],[["limon","limón","limones"],29.0,1.1,9.3,0.3,100],[["zumo de limon","zumo de limón","zumo de medio limon","zumo de medio limón"],22.0,0.4,6.9,0.2,30],[["lima"],30.0,0.7,10.5,0.2,65],[["naranja","naranjas"],47.0,0.9,11.8,0.1,180],[["manzana","manzanas"],52.0,0.3,13.8,0.2,180],[["pera","peras"],57.0,0.4,15.2,0.1,180],[["platano","plátano","platanos","plátanos","banana"],89.0,1.1,22.8,0.3,120],[["fresas","fresa"],32.0,0.7,7.7,0.3,12],[["arandanos","arándanos"],57.0,0.7,14.5,0.3,null],[["frambuesas"],52.0,1.2,11.9,0.7,null],[["uvas"],69.0,0.7,18.1,0.2,null],[["piña"],50.0,0.5,13.1,0.1,null],[["mango"],60.0,0.8,15.0,0.4,300],[["kiwi"],61.0,1.1,14.7,0.5,75],[["melon","melón"],34.0,0.8,8.2,0.2,null],[["sandia","sandía"],30.0,0.6,7.6,0.2,null],[["perejil"],36.0,3.0,6.3,0.8,null],[["cilantro"],23.0,2.1,3.7,0.5,null],[["albahaca"],23.0,3.2,2.7,0.6,null],[["jengibre"],80.0,1.8,17.8,0.8,null],[["huevo","huevos"],143.0,12.6,0.7,9.5,55],[["clara de huevo","claras","claras de huevo"],52.0,10.9,0.7,0.2,33],[["yema","yemas"],322.0,15.9,3.6,26.5,17],[["leche entera"],61.0,3.2,4.8,3.3,null],[["leche desnatada"],34.0,3.4,5.0,0.1,null],[["leche","leche semidesnatada"],46.0,3.3,4.8,1.6,null],[["bebida de almendras","leche de almendras"],15.0,0.4,1.3,1.0,null],[["yogur","yogur natural"],61.0,3.5,4.7,3.3,125],[["yogur griego","yogur griego natural"],97.0,9.0,4.0,5.0,125],[["yogur griego 0%","yogur 0%","yogur desnatado"],59.0,10.2,3.6,0.4,125],[["nata","nata para montar","nata liquida","nata líquida"],340.0,2.8,2.8,36.1,null],[["nata para cocinar","nata ligera","nata para cocinar ligera"],195.0,2.5,3.5,18.0,null],[["queso","queso curado","queso manchego"],392.0,35.8,3.2,25.0,null],[["queso rallado","parmesano"],420.0,28.4,13.9,27.8,null],[["queso fresco","queso de burgos"],138.0,11.4,5.1,7.9,null],[["mozzarella"],254.0,24.3,2.8,15.9,125],[["queso crema","queso untable"],350.0,6.2,5.5,34.4,null],[["requeson","requesón","queso cottage"],81.0,10.5,4.8,2.3,null],[["pollo","pechuga de pollo","pechugas de pollo"],120,22.5,0,2.6,200],[["muslo de pollo","contramuslo","contramuslos"],121.0,19.7,0,4.1,100],[["pavo","pechuga de pavo"],114.0,23.3,0,2.3,null],[["carne picada de pavo","pavo picado"],150.0,18.7,0,8.3,null],[["carne picada","carne picada de ternera","ternera picada"],215.0,18.6,0,15.0,null],[["ternera","filete de ternera"],173.0,22.2,0,8.7,null],[["cerdo"],198.0,19.7,0,12.6,null],[["solomillo de cerdo"],109.0,21.0,0,2.2,null],[["bacon","panceta","beicon"],393.0,13.7,0,37.1,null],[["jamon serrano","jamón serrano","jamon","jamón"],164.0,16.6,3.6,8.8,null],[["jamon york","jamón york","jamón cocido"],107.0,16.9,0.7,4.0,null],[["chorizo"],296.0,13.6,3.8,25.1,null],[["salmon","salmón"],208.0,20.4,0,13.4,null],[["atun","atún","atún en lata","atun en lata"],86.0,19.4,0,1.0,null],[["merluza","bacalao","pescado blanco"],82.0,17.8,0,0.7,null],[["gambas","gamba","langostinos","langostino"],85.0,20.1,0,0.5,15],[["mejillones","mejillon","mejillón"],86.0,11.9,3.7,2.2,null],[["almejas","almeja"],86.0,14.7,3.6,1.0,null],[["calamar","calamares","sepia"],92.0,15.6,3.1,1.4,null],[["pulpo"],82.0,14.9,2.2,1.0,null],[["sardinas","sardina"],208.0,24.6,0,11.5,null],[["garbanzos","garbanzo"],378.0,20.5,63.0,6.0,null],[["garbanzos cocidos"],139.0,7.1,22.5,2.8,null],[["lentejas","lenteja"],352.0,24.6,63.4,1.1,null],[["alubias","judias blancas","judías blancas","alubias blancas"],333.0,23.4,60.3,0.9,null],[["alubias rojas"],333.0,23.6,60.0,0.8,null],[["tofu"],144.0,17.3,2.8,8.7,null],[["almendras","almendra"],579.0,21.2,21.6,49.9,null],[["nueces","nuez"],654.0,15.2,13.7,65.2,null],[["avellanas"],628.0,15.0,16.7,60.8,null],[["cacahuetes"],567.0,25.8,16.1,49.2,null],[["crema de cacahuete","mantequilla de cacahuete"],598.0,22.2,22.3,51.4,null],[["pipas","semillas de girasol"],584.0,20.8,20.0,51.5,null],[["chia","semillas de chia","semillas de chía"],486.0,16.5,42.1,30.7,null],[["sesamo","sésamo"],573.0,17.7,23.5,49.7,null],[["cacao","cacao en polvo","cacao puro"],228.0,19.6,57.9,13.7,null],[["chocolate negro","chocolate"],598.0,7.8,45.9,42.6,null],[["levadura"],325.0,40.4,41.2,7.6,null],[["levadura quimica","levadura química","polvo de hornear"],51.0,0.1,24.1,0,null],[["maicena","almidon de maiz","almidón de maíz"],381.0,0.3,91.3,0.1,null],[["caldo","caldo de pollo"],6.0,0.6,0.4,0.2,null],[["caldo de verduras"],5.0,0.2,0.9,0.1,null],[["fumet","fumet de pescado","caldo de pescado"],16.0,2.0,0.4,0.6,null],[["vino blanco","vino"],82.0,0.1,2.6,0,null],[["vino tinto"],85.0,0.1,2.6,0,null],[["cerveza"],43.0,0.5,3.6,0,null],[["agua"],0,0,0,0,null],[["proteina en polvo","proteína en polvo","whey"],352.0,78.1,6.3,1.6,null],[["aceitunas"],116.0,0.8,6.0,10.9,4],[["tortilla de trigo","wrap","tortillas de trigo"],306.0,8.2,49.4,8.0,45],[["quinoa","quinoa"],368.0,14.1,64.2,6.1,null],[["cuscus","cuscús"],376.0,12.8,77.4,0.6,null],[["pan de hamburguesa"],279.0,9.8,50.1,3.9,50],[["edulcorante","eritritol","stevia"],0,0,0,0,null],[["gelatina"],335.0,85.6,0,0.1,null],[["coco rallado"],660.0,6.9,23.7,64.5,null],[["leche de coco"],197.0,2.0,2.8,21.3,null]];
 
 // Añadidos tras la auditoría: variantes 0 %, bebidas vegetales y básicos fit que se confundían con otros alimentos
 NUTRI_ROWS.push(
@@ -522,6 +561,16 @@ NUTRI_ROWS.push(
   [['semillas de lino', 'lino'], 534, 18, 29, 42, null],
   [['datiles', 'dátiles', 'datil', 'dátil'], 282, 2.5, 75, 0.4, 8],
   [['sirope de agave', 'sirope'], 300, 0, 75, 0, null],
+  // Pescados y carnes que faltaban (antes "lomo de emperador" o "lomo de dorada" se confundían con cerdo)
+  [['emperador', 'pez espada', 'lomo de emperador'], 144, 19.7, 0, 6.7, null],
+  [['dorada', 'lomo de dorada'], 100, 19.5, 0, 2.5, null],
+  [['lubina', 'lomo de lubina'], 97, 18.4, 0, 2, null],
+  [['rape'], 76, 14.5, 0, 1.5, null],
+  [['cinta de lomo', 'cinta de lomo de cerdo', 'lomo de cerdo', 'lomo', 'medallones de lomo'], 143, 21, 0, 6, null],
+  [['carne picada de pollo', 'pollo picado', 'picada de pollo', 'carne picada de pechuga de pollo'], 143, 17.4, 0, 8.1, null],
+  [['yogur griego desnatado', 'yogur griego natural desnatado', 'yogur natural desnatado'], 59, 10.2, 3.6, 0.4, 125],
+  [['cebolla tierna', 'cebolla dulce'], 32, 1.8, 7.3, 0.2, 100],
+  [['tomate pelado', 'tomate entero pelado', 'tomates pelados', 'tomate en conserva'], 21, 0.9, 3.5, 0.3, null],
 );
 
 const Nutrition = (() => {
@@ -534,18 +583,43 @@ const Nutrition = (() => {
   function match(ing) {
     if (ing.nutriKey === 'none') return null;
     if (ing.nutriKey && byKey.has(ing.nutriKey)) return byKey.get(ing.nutriKey);
+    // Se prueba el nombre tal cual y en singular ("tomates cherrys" → "tomate cherry"),
+    // y gana siempre el alimento más concreto (el nombre más largo que coincida).
     const n = clean(ing.name);
-    for (const { a, row } of index) if (n.includes(' ' + a + ' ')) return row;
-    // plural sencillo: "tomates" -> "tomate", "limones" -> "limon"
-    for (const sing of [n.replace(/(\w{3,})s\b/g, '$1'), n.replace(/(\w{3,})es\b/g, '$1')]) {
-      for (const { a, row } of index) if (sing.includes(' ' + a + ' ')) return row;
+    const variants = [n, n.replace(/(\w{3,})es\b/g, '$1'), n.replace(/(\w{3,})s\b/g, '$1')];
+    let best = null;
+    for (const v of variants) {
+      for (const it of index) {
+        if (best && it.a.length <= best.a.length) break; // el índice va de más largo a más corto
+        if (v.includes(' ' + it.a + ' ')) { best = it; break; }
+      }
     }
+    return best ? best.row : null;
+  }
+
+  // Piezas que no son el alimento entero: 2 hojas de lechuga no son 2 lechugas
+  const PIECES = [
+    [/\bhojas?\b/, 8], [/\brodajas?\b/, 20], [/\baros?\b/, 5], [/\blaminas?\b/, 8], [/\bpunados?\b/, 30],
+    [/\blonchas?\b/, 15], [/\brebanadas?\b/, 35], [/\bgajos?\b/, 12], [/\bramas?\b|\bramitas?\b/, 3],
+    [/\blatas?\b/, 56], [/\bdientes?\b/, 5], [/\btiras?\b/, 10],
+  ];
+  /** Peso escrito en el propio nombre: "de unos 150/200 gramos", "aproximadamente 125 g". */
+  function gramsInName(name) {
+    const t = norm(name).replace(',', '.');
+    const m = t.match(/(\d+(?:\.\d+)?)\s*(?:\/|-|a|o)\s*(\d+(?:\.\d+)?)\s*(?:g|gr|grs|gramos)\b/) || t.match(/(\d+(?:\.\d+)?)\s*(?:g|gr|grs|gramos)\b/);
+    if (!m) return null;
+    return m[2] ? (parseFloat(m[1]) + parseFloat(m[2])) / 2 : parseFloat(m[1]);
+  }
+  function pieceGrams(name) {
+    // Solo cuenta si la pieza va al principio ("Hojas de lechuga"), no en "Aguacate cortado a láminas"
+    const first = norm(name).trim().split(/\s+/)[0] || '';
+    for (const [re, g] of PIECES) if (re.test(first)) return g;
     return null;
   }
 
   /** Gramos de un ingrediente. Devuelve { g } o { reason } si no se puede saber. */
-  function grams(q, unit, row) {
-    const oil = row[0][0].startsWith('aceite');
+  function grams(q, unit, row, name = '') {
+    const oil = row ? row[0][0].startsWith('aceite') : false;
     switch (unit) {
       case 'g': return { g: q };
       case 'kg': return { g: q * 1000 };
@@ -556,13 +630,20 @@ const Nutrition = (() => {
       case 'taza': return { g: q * 240 };
       case 'pizca': return { g: (q || 1) * 0.5 };
       case 'al gusto': return { g: 0, ignore: true };
-      default: return row[5] ? { g: q * row[5] } : { reason: 'falta el peso' };
+      case 'diente': return { g: q * 5 };
+      default: {
+        const inName = gramsInName(name);
+        if (inName != null) return { g: inName * (q || 1) };
+        const piece = pieceGrams(name);
+        if (piece != null) return { g: piece * (q || 1) };
+        return row && row[5] ? { g: q * row[5] } : { reason: 'falta el peso' };
+      }
     }
   }
 
   /** Totales de una versión completa (todas sus raciones) y detalle por ingrediente. */
   function forVersion(recipe, version, recipesById, depth = 0) {
-    const tot = { kcal: 0, p: 0, c: 0, f: 0 };
+    const tot = { kcal: 0, p: 0, c: 0, f: 0, grams: 0 };
     const items = [];
     let counted = 0, total = 0;
     for (const ing of version.ingredients) {
@@ -570,8 +651,13 @@ const Nutrition = (() => {
       const sub = ing.recipeId && recipesById?.get(ing.recipeId);
       if (sub && depth < 3) {
         const st = forVersion(sub, sub.versions[0], recipesById, depth + 1);
-        tot.kcal += st.kcal; tot.p += st.p; tot.c += st.c; tot.f += st.f;
-        items.push({ ing, status: 'recipe', label: `Receta: ${sub.name}`, kcal: st.kcal });
+        // Solo la parte que usas: 2 cucharadas de una salsa que pesa 140 g son el 21 %
+        let share = ing.qty == null ? 1 : ing.qty;
+        if (['g', 'kg', 'ml', 'l', 'cda', 'cdta', 'taza'].includes(ing.unit) && ing.qty != null && st.grams > 0) {
+          share = Math.min(1, grams(ing.qty, ing.unit, null).g / st.grams);
+        }
+        tot.kcal += st.kcal * share; tot.p += st.p * share; tot.c += st.c * share; tot.f += st.f * share; tot.grams += st.grams * share;
+        items.push({ ing, status: 'recipe', label: `Receta: ${sub.name}${share < 1 ? ` (${Math.round(share * 100)} % de la receta)` : ''}`, kcal: st.kcal * share });
         counted++; total++;
         continue;
       }
@@ -579,12 +665,12 @@ const Nutrition = (() => {
       total++;
       const row = match(ing);
       if (!row) { items.push({ ing, status: ing.nutriKey === 'none' ? 'excluded' : 'nomatch' }); continue; }
-      const gr = grams(ing.qty, ing.unit, row);
+      const gr = grams(ing.qty, ing.unit, row, ing.name);
       if (gr.ignore) { total--; items.push({ ing, status: 'ignored' }); continue; }
       if (gr.g == null) { items.push({ ing, status: 'noweight', row }); continue; }
       const k = gr.g / 100;
       const it = { kcal: row[1] * k, p: row[2] * k, c: row[3] * k, f: row[4] * k };
-      tot.kcal += it.kcal; tot.p += it.p; tot.c += it.c; tot.f += it.f;
+      tot.kcal += it.kcal; tot.p += it.p; tot.c += it.c; tot.f += it.f; tot.grams += gr.g;
       counted++;
       items.push({ ing, status: 'ok', row, g: gr.g, ...it });
     }
@@ -1189,9 +1275,13 @@ async function RecipeView(app, id, params) {
       const done = checks.has(s.id);
       return `<li class="step ${done ? 'is-done' : ''}" data-check="${s.id}" role="checkbox" aria-checked="${done}" tabindex="0">
         <span class="step-num serif">${String(n + 1).padStart(2, '0')}</span>
-        <div><p class="step-text">${esc(s.text)}</p>
-          ${s.imageId && Images.cached(s.imageId) ? photoHTML(s.imageId, { natural: true }) : ''}
-          ${s.timerMin ? `<span class="step-timer">${icon('timer', 'ic-sm')}${formatMinutes(s.timerMin)}</span>` : ''}</div></li>`;
+        <div class="step-text">${(() => { const p = parseStep(s.text); return `
+          ${p.title ? `<p class="step-title serif">${esc(p.title)}</p>` : ''}
+          ${stepBodyHTML(p)}
+          ${p.power || s.timerMin ? `<div class="step-tags">
+            ${p.power ? `<span class="step-tag">${icon('flame', 'ic-sm')}Fuego ${esc(p.power)}</span>` : ''}
+            ${s.timerMin ? `<span class="step-tag">${icon('timer', 'ic-sm')}${formatMinutes(s.timerMin)}</span>` : ''}</div>` : ''}`; })()}
+          ${s.imageId && Images.cached(s.imageId) ? photoHTML(s.imageId, { natural: true }) : ''}</div></li>`;
     }).join('')}</ol>`;
   }
 
@@ -1212,6 +1302,7 @@ async function RecipeView(app, id, params) {
             ${photoHTML(recipe.coverImageId, { alt: recipe.name, hero: true })}
             ${recipe.category ? `<p class="recipe-kicker">${esc(recipe.category)}</p>` : ''}
             <h1 class="recipe-name serif">${esc(recipe.name || 'Sin nombre')}</h1>
+            ${recipe.versions.length === 1 && version.name && version.name !== 'Original' ? `<p class="recipe-sub serif">${esc(version.name)}</p>` : ''}
             <div class="ornament" aria-hidden="true"><b></b><i></i><b></b></div>
             ${statsHTML()}
           </section>
@@ -1219,7 +1310,7 @@ async function RecipeView(app, id, params) {
         <div>
           <section class="block versions-block" aria-label="Versiones">
             <div class="chips text-tabs">
-              ${recipe.versions.map((v) => `<button class="chip ${v.id === version.id ? 'is-on' : ''}" data-version="${v.id}" aria-pressed="${v.id === version.id}">${esc(v.name)}</button>`).join('')}
+              ${recipe.versions.length > 1 ? recipe.versions.map((v) => `<button class="chip ${v.id === version.id ? 'is-on' : ''}" data-version="${v.id}" aria-pressed="${v.id === version.id}">${esc(v.name)}</button>`).join('') : ''}
               <button class="chip text-tab-add" data-act="new-version">${icon('plus', 'ic-sm')}Versión</button>
             </div>
           </section>
@@ -1621,7 +1712,7 @@ async function EditorView(app, id, params) {
       </div>
 
       <div class="editor-group"><h2 class="serif">Preparación</h2><p class="hint">Lo que dejas listo antes de cocinar: lavar, cortar, marinar…</p><div style="display:grid;gap:12px">${stepsBlock('prep')}</div></div>
-      <div class="editor-group"><h2 class="serif">Elaboración</h2><p class="hint">El cocinado, paso a paso.</p><div style="display:grid;gap:12px">${stepsBlock('cook')}</div></div>
+      <div class="editor-group"><h2 class="serif">Elaboración</h2><p class="hint">El cocinado, paso a paso. Truco: si la primera línea termina en «:» sale como título; las líneas que empiezan por «-» salen como lista, y «Potencia al 7» como etiqueta de fuego.</p><div style="display:grid;gap:12px">${stepsBlock('cook')}</div></div>
 
       <div class="editor-group"><h2 class="serif">Notas</h2>
         <textarea class="textarea" data-v="notes" rows="3" placeholder="Trucos, variantes, de dónde viene la receta…">${esc(version.notes)}</textarea></div>
@@ -1981,7 +2072,10 @@ async function CookView(app, id, params) {
           ? photoHTML(s.imageId, { natural: true })
           : Images.cached(recipe.coverImageId) ? `<div class="cook-cover">${photoHTML(recipe.coverImageId, { alt: '' })}</div>` : ''}
         <p class="cook-phase">${s.phase} ${phaseN} de ${phaseTotal}</p>
-        <p class="cook-text serif">${esc(s.text)}</p>
+        ${(() => { const p = parseStep(s.text); const long = s.text.length > 160; return `
+          ${p.title ? `<p class="cook-title serif">${esc(p.title)}</p>` : ''}
+          ${p.power ? `<span class="cook-power">${icon('flame', 'ic-sm')}Fuego ${esc(p.power)}</span>` : ''}
+          <div class="cook-body-text ${p.title || long ? '' : 'solo'}">${stepBodyHTML(p, { big: true })}</div>`; })()}
         <div id="timer">${timerHTML(s)}</div>
       </section>
       <nav class="cook-nav">
@@ -2012,7 +2106,8 @@ async function CookView(app, id, params) {
 
   const readStep = () => {
     const s = steps[index];
-    Voice.speak(`Paso ${index + 1}. ${s.text}${s.timerMin ? `. Temporizador de ${formatMinutes(s.timerMin).replace('min', 'minutos').replace(' h', ' horas')}.` : ''}`);
+    const p = parseStep(s.text);
+    Voice.speak(`Paso ${index + 1}. ${p.title ? p.title + '. ' : ''}${p.power ? `Fuego ${p.power}. ` : ''}${p.body.map((l) => l.text).join('. ')}${s.timerMin ? `. Temporizador de ${formatMinutes(s.timerMin).replace('min', 'minutos').replace(' h', ' horas')}.` : ''}`);
   };
   const move = (d) => { const n = index + d; if (n < 0 || n >= steps.length) return; index = n; paint(); readStep(); };
   const voiceHandlers = {
@@ -3163,6 +3258,9 @@ const Book = (() => {
       y += 38; x.fillStyle = C.accent; x.font = `400 23px ${SANS}`;
       x.fillText(`Por ración, aprox.: ${Math.round(n.kcal)} kcal     ${Math.round(n.p)} g proteína     ${Math.round(n.c)} g hidratos     ${Math.round(n.f)} g grasa`, W / 2, y);
     }
+    if (r.versions.length === 1 && v.name && v.name !== 'Original') {
+      y += 44; x.fillStyle = C.text2; x.font = `italic 400 28px ${SERIF}`; x.fillText(ellipsize(x, v.name, TW), W / 2, y);
+    }
     if (r.versions.length > 1) {
       y += 34; x.fillStyle = C.text3; x.font = `italic 400 21px ${SANS}`;
       x.fillText(`Versión «${v.name}». Otras versiones en la app: ${r.versions.slice(1).map((o) => o.name).join(', ')}`, W / 2, y);
@@ -3245,11 +3343,21 @@ const Book = (() => {
       if (!list.length) return;
       x.font = `400 ${BODY}px ${SANS}`;
       const blocks = list.map((st, k) => {
-        const lines = paragraphs(x, st.text, TW - 80);
-        const timer = st.timerMin ? `Temporizador: ${formatMinutes(st.timerMin)}` : '';
-        return { num: String(k + 1).padStart(2, '0'), lines: lines.length ? lines : [''], timer };
+        const p = parseStep(st.text);
+        // Cada línea recuerda su estilo: título, viñeta o texto normal
+        const lines = [];
+        if (p.title) { x.font = `400 27px ${SERIF}`; breakLong(x, Card.wrap(x, p.title, TW - 80), TW - 80).forEach((t) => lines.push({ t, kind: 'title' })); }
+        x.font = `400 ${BODY}px ${SANS}`;
+        for (const l of p.body) {
+          const w = l.bullet ? TW - 110 : TW - 80;
+          breakLong(x, Card.wrap(x, l.text, w), w).forEach((t, i) => lines.push({ t, kind: l.bullet ? (i ? 'bulletcont' : 'bullet') : 'text' }));
+        }
+        const tags = [p.power ? `Fuego ${p.power}` : '', st.timerMin ? `Temporizador: ${formatMinutes(st.timerMin)}` : ''].filter(Boolean).join('      ');
+        return { num: String(k + 1).padStart(2, '0'), lines: lines.length ? lines : [{ t: '', kind: 'text' }], timer: tags };
       });
-      const firstH = 26 + Math.min(blocks[0].lines.length, 3) * LINE;
+      // El título de la sección exige el mismo hueco que pedirá su primer paso: así nunca se queda solo al pie
+      const hOf = (b) => 26 + b.lines.length * LINE + (b.timer ? 30 : 0);
+      const firstH = hOf(blocks[0]) < (maxY - M) * 0.5 ? hOf(blocks[0]) : 26 + LINE * 2;
       await heading(title, firstH);
       for (const b of blocks) {
         const h = 26 + b.lines.length * LINE + (b.timer ? 30 : 0);
@@ -3262,7 +3370,12 @@ const Book = (() => {
           if (!first && y + LINE > maxY) await start(true);
           y += first ? 8 : LINE;
           if (first) { x.fillStyle = C.accent; x.font = `italic 400 34px ${SERIF}`; x.fillText(b.num, M, y + 4); }
-          x.fillStyle = C.text; x.font = `400 ${BODY}px ${SANS}`; x.fillText(b.lines[k], M + 80, y);
+          const ln = b.lines[k];
+          if (ln.kind === 'title') { x.fillStyle = C.text; x.font = `400 27px ${SERIF}`; x.fillText(ln.t, M + 80, y); }
+          else if (ln.kind === 'bullet' || ln.kind === 'bulletcont') {
+            if (ln.kind === 'bullet') { x.fillStyle = C.accent; x.fillRect(M + 84, y - 9, 6, 6); }
+            x.fillStyle = C.text; x.font = `400 ${BODY}px ${SANS}`; x.fillText(ln.t, M + 110, y);
+          } else { x.fillStyle = C.text; x.font = `400 ${BODY}px ${SANS}`; x.fillText(ln.t, M + 80, y); }
           first = false;
         }
         if (b.timer) { y += 30; x.fillStyle = C.accent; x.font = `400 20px ${SANS}`; x.fillText(b.timer, M + 80, y); }
