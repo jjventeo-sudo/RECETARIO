@@ -10,7 +10,7 @@
    ========================================================================= */
 'use strict';
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.10.0';
 
 /* =========================================================================
    1. Utilidades
@@ -422,7 +422,7 @@ const Store = {
    ========================================================================= */
 
 const Docs = (() => {
-  const NAMES = ['plan', 'shopRecipes', 'shopManual', 'shopChecks', 'categories', 'pantry', 'catOrder'];
+  const NAMES = ['plan', 'shopRecipes', 'shopManual', 'shopChecks', 'categories', 'pantry', 'catOrder', 'menuExtras'];
   const listeners = new Set();
 
   const get = async (name) => (await Meta.get(`doc:${name}`)) || {};
@@ -1473,26 +1473,34 @@ async function addToPlanFlow(recipe, version) {
   const days = Array.from({ length: 14 }, (_, i) => Dates.addDays(new Date(), i));
   let day = Dates.key(days[0]);
   let slot = new Date().getHours() < 16 ? 'comida' : 'cena';
+  let who = 'both';
   const plan = Docs.live(await Docs.get('plan'));
   const label = (d, i) => (i === 0 ? 'Hoy' : i === 1 ? 'Mañana' : `${Dates.weekday(d).slice(0, 3)} ${d.getDate()}`);
   const ok = await Sheets.open((el, close) => {
     const paint = () => {
-      const taken = plan[`${day}|${slot}`];
+      const people = who === 'both' ? PEOPLE.map(([p]) => p) : [who];
+      const taken = people.some((p) => MenuPlan.cell(plan, day, slot, p));
       el.innerHTML = `<h2 class="serif">Añadir al menú</h2><p>${esc(recipe.name)}</p>
         <div class="chips" style="margin-bottom:12px">${days.map((d, i) => `<button class="chip ${Dates.key(d) === day ? 'is-on' : ''}" data-d="${Dates.key(d)}">${label(d, i)}</button>`).join('')}</div>
         <div class="segmented">${SLOTS.map(([k, l]) => `<button data-s="${k}" aria-selected="${k === slot}">${l}</button>`).join('')}</div>
-        ${taken ? `<p class="hint">Ese hueco ya tiene receta: se sustituirá.</p>` : ''}
+        <div class="segmented three">${WHO.map(([k, l]) => `<button data-w="${k}" aria-selected="${k === who}">${l}</button>`).join('')}</div>
+        ${taken ? `<p class="hint">Ya hay algo apuntado ahí: se sustituirá.</p>` : ''}
         <div class="actions"><button class="btn btn-ghost" data-c="0">Cancelar</button><button class="btn btn-primary" data-c="1">Añadir</button></div>`;
     };
     paint();
     el.addEventListener('click', (e) => {
       const d = e.target.closest('[data-d]'); if (d) { day = d.dataset.d; paint(); return; }
       const sl = e.target.closest('[data-s]'); if (sl) { slot = sl.dataset.s; paint(); return; }
+      const w = e.target.closest('[data-w]'); if (w) { who = w.dataset.w; paint(); return; }
       const c = e.target.closest('[data-c]'); if (c) close(c.dataset.c === '1');
     });
   }, { label: 'Añadir al menú' });
   if (!ok) return;
-  await Docs.put('plan', `${day}|${slot}`, { recipeId: recipe.id, versionId: version.id, servings: version.servings || 2 });
+  const value = { recipeId: recipe.id, versionId: version.id, servings: 1 };
+  const ops = MenuPlan.upgradeOps(plan, day, slot);
+  if (who === 'both') ops.push(['put', `${day}|${slot}|juanjo`, value], ['put', `${day}|${slot}|maria`, { same: true }]);
+  else ops.push(['put', `${day}|${slot}|${who}`, value]);
+  await MenuPlan.apply('plan', ops);
   toast('Añadida al menú', { label: 'Ver menú', run: () => Router.go('#/menu') });
 }
 
@@ -2299,26 +2307,132 @@ async function addToShopping(recipeId, versionId, servings, { silent = false } =
   if (!silent) toast('Añadida a la lista de la compra', { label: 'Ver lista', run: () => Router.go('#/compra') });
 }
 
-/* ---------- 7.7 Menú semanal ---------- */
+/* ---------- 7.7 Menú semanal: Juanjo y María ----------
+   Cada hueco es día + comida/cena + persona. Puede ser una receta, un texto escrito
+   a mano o "lo mismo que Juanjo". Además hay notas fijas (desayuno, almuerzo,
+   merienda…) que salen todos los días y una nota libre por día.
+   Claves en el documento 'plan':
+     "2026-10-12|comida|juanjo"  → { recipeId, versionId, servings } | { text } | { same: true }
+     "2026-10-12|daynote"        → { text }
+     "2026-10-12|fix:<id>"       → { text }   (cambio de una nota fija solo ese día)
+   Notas fijas en el documento 'menuExtras': <id> → { label, who, text, hidden } */
+
+const PEOPLE = [['juanjo', 'Juanjo'], ['maria', 'María']];
+const personName = (p) => (PEOPLE.find(([k]) => k === p) || [p, p])[1];
+const NOTE_LABELS = ['Desayuno', 'Almuerzo', 'Merienda'];
+const WHO = [['juanjo', 'Juanjo'], ['maria', 'María'], ['both', 'Los dos']];
+const whoName = (w) => (WHO.find(([k]) => k === w) || ['', ''])[1];
+
+const MenuPlan = {
+  /** Lo apuntado en un hueco. Entiende el formato antiguo (una receta para los dos, sin persona). */
+  cell(plan, day, slot, person) {
+    const e = plan[`${day}|${slot}|${person}`];
+    if (e) return e;
+    const old = plan[`${day}|${slot}`];
+    if (old && old.recipeId) return person === 'juanjo' ? { recipeId: old.recipeId, versionId: old.versionId, servings: 1 } : { same: true };
+    return null;
+  },
+  /** Igual que cell, pero "lo mismo que Juanjo" se convierte en lo que tenga Juanjo. */
+  resolve(plan, day, slot, person) {
+    const c = MenuPlan.cell(plan, day, slot, person);
+    if (c && c.same) { const j = MenuPlan.cell(plan, day, slot, 'juanjo'); return j && !j.same ? j : null; }
+    return c;
+  },
+  /** Antes de cambiar un hueco del formato antiguo, lo pasa al nuevo (una entrada por persona). */
+  upgradeOps(plan, day, slot) {
+    const old = plan[`${day}|${slot}`];
+    if (!old || !old.recipeId) return [];
+    const ops = PEOPLE.filter(([p]) => !plan[`${day}|${slot}|${p}`]).map(([p]) => ['put', `${day}|${slot}|${p}`, MenuPlan.cell(plan, day, slot, p)]);
+    ops.push(['remove', `${day}|${slot}`]);
+    return ops;
+  },
+  /** Ejecuta varios cambios y solo avisa a la pantalla en el último (así no parpadea). */
+  async apply(doc, ops) {
+    for (let i = 0; i < ops.length; i++) {
+      const [kind, key, value] = ops[i];
+      const opts = { quiet: i < ops.length - 1 };
+      if (kind === 'put') await Docs.put(doc, key, value, opts); else await Docs.remove(doc, key, opts);
+    }
+  },
+};
 
 async function MenuView(app) {
   UI.menuWeek ??= 0;
+  UI.menuMode ??= 'day';
   const recipes = await Store.list();
   const byId = new Map(recipes.map((r) => [r.id, r]));
   await Images.preload(recipes.map((r) => r.coverImageId));
-  let firstPaint = true;
+  const nutriCache = new Map();
+
+  const weekDays = () => { const m = Dates.monday(UI.menuWeek); return Array.from({ length: 7 }, (_, i) => Dates.addDays(m, i)); };
+  const recipeOf = (c) => (c && c.recipeId ? byId.get(c.recipeId) : null);
+
+  function nutriOf(c) {
+    const r = recipeOf(c);
+    if (!r) return null;
+    const v = r.versions.find((x) => x.id === c.versionId) || r.versions[0];
+    const key = `${r.id}|${v.id}|${r.updatedAt}`;
+    if (!nutriCache.has(key)) nutriCache.set(key, Nutrition.perServing(r, v, byId));
+    const n = nutriCache.get(key);
+    return n.counted ? { kcal: n.kcal * (c.servings || 1), p: n.p * (c.servings || 1) } : null;
+  }
+
+  function cellHTML(plan, k, s, p) {
+    const c = MenuPlan.cell(plan, k, s, p);
+    const btn = (inner, cls = '') => `<button class="mcell ${cls}" data-cell="${k}|${s}|${p}"><span class="mcell-who">${personName(p)}</span>${inner}</button>`;
+    if (c && c.same) {
+      const j = MenuPlan.resolve(plan, k, s, p);
+      const what = j ? (j.text != null ? j.text : recipeOf(j)?.name || '') : '';
+      return btn(`<span class="mcell-ic is-gold">${icon('link', 'ic-sm')}</span><span class="mcell-body"><span class="mcell-same">Lo mismo que Juanjo</span>${what ? `<span class="mcell-meta">${esc(what)}</span>` : ''}</span>`);
+    }
+    if (c && c.text != null) return btn(`<span class="mcell-ic">${icon('pencil', 'ic-sm')}</span><span class="mcell-body"><span class="mcell-hand">${esc(c.text)}</span></span>`);
+    const r = recipeOf(c);
+    if (r) {
+      const n = nutriOf(c);
+      return btn(`${thumbHTML(r.coverImageId)}<span class="mcell-body"><span class="mcell-name serif">${esc(r.name)}</span><span class="mcell-meta">Receta${n ? ` · ${Math.round(n.kcal)} kcal` : ''}</span></span>`);
+    }
+    return btn(`<span class="slot-add">${icon('plus', 'ic-sm')}Añadir</span>`, 'is-empty');
+  }
+
+  function shortHTML(plan, k, s, p) {
+    const c = MenuPlan.cell(plan, k, s, p);
+    if (!c) return '<span class="wk-v is-empty">—</span>';
+    if (c.same) return '<span class="wk-v is-same">= Juanjo</span>';
+    if (c.text != null) return `<span class="wk-v is-hand">${esc(c.text)}</span>`;
+    const r = recipeOf(c);
+    return r ? `<span class="wk-v serif">${esc(r.name)}</span>` : '<span class="wk-v is-empty">—</span>';
+  }
+
+  function dayKcal(plan, k) {
+    const parts = PEOPLE.map(([p, name]) => {
+      let kcal = 0, any = false;
+      for (const [s] of SLOTS) { const n = nutriOf(MenuPlan.resolve(plan, k, s, p)); if (n) { kcal += n.kcal; any = true; } }
+      return any ? `${name} ≈ ${nf.format(Math.round(kcal))} kcal` : '';
+    }).filter(Boolean);
+    return parts.length ? `<p class="day-kcal">${icon('flame', 'ic-sm')}${parts.join('   ·   ')}<span>solo recetas</span></p>` : '';
+  }
+
+  const fixedOrder = (a, b) => {
+    const ia = NOTE_LABELS.indexOf(a.label), ib = NOTE_LABELS.indexOf(b.label);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.label.localeCompare(b.label, 'es') || WHO.findIndex(([w]) => w === a.who) - WHO.findIndex(([w]) => w === b.who);
+  };
 
   async function paint() {
-    const plan = Docs.live(await Docs.get('plan'));
-    const monday = Dates.monday(UI.menuWeek);
-    const days = Array.from({ length: 7 }, (_, i) => Dates.addDays(monday, i));
-    const todayKey = Dates.key(new Date());
-    const weekEntries = days.flatMap((d) => SLOTS.map(([s]) => plan[`${Dates.key(d)}|${s}`]).filter((e) => e && byId.has(e.recipeId)));
-    const y = window.scrollY;
+    const [plan, extras] = await Promise.all([Docs.get('plan').then(Docs.live), Docs.get('menuExtras').then(Docs.live)]);
+    const days = weekDays();
+    const keys = days.map(Dates.key);
+    const today = Dates.key(new Date());
+    if (!keys.includes(UI.menuDay)) UI.menuDay = keys.includes(today) ? today : keys[0];
+    const k = UI.menuDay;
+    const d = days[keys.indexOf(k)];
+    const hasAny = (key) => SLOTS.some(([s]) => PEOPLE.some(([p]) => MenuPlan.cell(plan, key, s, p))) || !!plan[`${key}|daynote`];
+    const fixed = Object.entries(extras).map(([id, n]) => ({ id, ...n })).sort(fixedOrder);
+    const visible = fixed.filter((n) => !n.hidden);
+    const hidden = fixed.filter((n) => n.hidden);
+    const y = scrollY;
 
-    app.innerHTML = `<div class="page has-tabbar">
-      <header class="home-head">
-        <div class="topbar"><p class="home-date">${UI.menuWeek === 0 ? 'Esta semana' : UI.menuWeek === 1 ? 'La semana que viene' : UI.menuWeek === -1 ? 'La semana pasada' : ''}</p></div>
+    const head = `<header class="home-head">
+        <div class="topbar"><p class="home-date">${UI.menuWeek === 0 ? 'Esta semana' : UI.menuWeek === 1 ? 'La semana que viene' : UI.menuWeek === -1 ? 'La semana pasada' : `${Dates.short(days[0])} – ${Dates.short(days[6])}`}</p></div>
         <h1 class="home-title serif">Menú</h1>
       </header>
       <div class="week-nav">
@@ -2327,127 +2441,297 @@ async function MenuView(app) {
         <button class="icon-btn" data-act="next" aria-label="Semana siguiente">${icon('chevron-right')}</button>
         ${UI.menuWeek !== 0 ? `<button class="chip" data-act="today">Hoy</button>` : ''}
       </div>
-      <div class="week">
-        ${days.map((d) => {
-          const k = Dates.key(d);
-          return `<section class="day ${k === todayKey ? 'is-today' : k < todayKey ? 'is-past' : ''}" aria-label="${Dates.weekday(d)} ${d.getDate()}">
-            <h2 class="day-name"><span class="serif">${Dates.weekday(d)}</span><span>${d.getDate()}</span></h2>
-            ${dayNutri(k, plan)}
-            ${SLOTS.map(([s, label]) => {
-              const e = plan[`${k}|${s}`];
-              const r = e && byId.get(e.recipeId);
-              return r
-                ? `<button class="slot is-filled" data-slot="${k}|${s}"><span class="slot-label">${label}</span>${thumbHTML(r.coverImageId)}
-                    <span class="slot-body"><span class="slot-name serif">${esc(r.name)}</span><span class="slot-meta">${e.servings} ${e.servings === 1 ? 'ración' : 'raciones'}</span></span></button>`
-                : `<button class="slot" data-slot="${k}|${s}"><span class="slot-label">${label}</span><span class="slot-add">${icon('plus', 'ic-sm')}Añadir</span></button>`;
+      <div class="segmented menu-mode" role="tablist">
+        <button role="tab" data-mode="day" aria-selected="${UI.menuMode === 'day'}">Día</button>
+        <button role="tab" data-mode="week" aria-selected="${UI.menuMode === 'week'}">Semana</button>
+      </div>`;
+
+    let body;
+    if (UI.menuMode === 'week') {
+      body = `<div class="wk">${days.map((dd, i) => {
+        const kk = keys[i];
+        const note = plan[`${kk}|daynote`]?.text;
+        return `<button class="wk-day ${kk === today ? 'is-today' : kk < today ? 'is-past' : ''}" data-goday="${kk}">
+          <div class="wk-head"><span class="serif">${Dates.weekday(dd)}</span><span>${dd.getDate()}</span></div>
+          <div class="wk-grid"><span></span>${PEOPLE.map(([, n]) => `<span class="wk-who">${n}</span>`).join('')}
+            ${SLOTS.map(([s, l]) => `<span class="wk-slot">${l}</span>${PEOPLE.map(([p]) => shortHTML(plan, kk, s, p)).join('')}`).join('')}</div>
+          ${note ? `<p class="wk-note">${icon('notes', 'ic-sm')}${esc(note)}</p>` : ''}
+        </button>`;
+      }).join('')}</div>
+      <div class="week-cta"><button class="btn btn-primary btn-block" data-act="week-shop">${icon('shopping-cart', 'ic-sm')}Añadir la semana a la compra</button></div>`;
+    } else {
+      const dayNote = plan[`${k}|daynote`]?.text;
+      body = `<div class="mday-strip" role="tablist" aria-label="Días">${days.map((dd, i) => {
+          const kk = keys[i];
+          return `<button class="mday ${kk === k ? 'is-on' : ''} ${kk === today ? 'is-today' : ''}" data-day="${kk}" role="tab" aria-selected="${kk === k}" aria-label="${Dates.weekday(dd)} ${dd.getDate()}">
+            <span>${'LMXJVSD'[i]}</span><b>${dd.getDate()}</b><i class="${hasAny(kk) ? 'on' : ''}"></i></button>`;
+        }).join('')}</div>
+        <section class="mday-body ${k < today ? 'is-past' : ''}">
+          <h2 class="mday-title serif">${Dates.weekday(d)} ${d.getDate()}</h2>
+          ${dayKcal(plan, k)}
+          ${SLOTS.map(([s, l]) => `<div class="mslot-head"><span>${l}</span></div>
+            ${PEOPLE.map(([p]) => cellHTML(plan, k, s, p)).join('')}`).join('')}
+
+          ${visible.length ? `<div class="fixed-card">
+            <div class="fixed-head"><span>Fijo cada día</span>${icon('repeat', 'ic-sm')}</div>
+            ${visible.map((n) => {
+              const over = plan[`${k}|fix:${n.id}`];
+              const text = over ? over.text : n.text;
+              return `<button class="fixed-row" data-fixed="${n.id}">
+                <span class="fixed-label">${esc(n.label)} · ${esc(whoName(n.who))}${over ? '<em>solo hoy</em>' : ''}</span>
+                <span class="mcell-hand">${esc(text || 'Sin escribir')}</span></button>`;
             }).join('')}
-          </section>`;
-        }).join('')}
-      </div>
-      ${weekEntries.length ? `<div class="week-cta">
-        <button class="btn btn-primary btn-block" data-act="to-shop">${icon('shopping-cart', 'ic-sm')}Añadir la semana a la lista de la compra</button></div>` : ''}
-    </div>
-    ${tabbarHTML('menu')}`;
-    if (firstPaint) {
-      firstPaint = false;
-      const today = UI.menuWeek === 0 && $('.day.is-today', app);
-      window.scrollTo(0, today && today.offsetTop > innerHeight * 0.6 ? today.offsetTop - 90 : 0);
-    } else window.scrollTo(0, y);
-  }
+          </div>` : ''}
 
-  const nutriCache = new Map();
-  function dayNutri(k, plan) {
-    let kcal = 0, p = 0, any = false;
-    for (const [s] of SLOTS) {
-      const e = plan[`${k}|${s}`];
-      const r = e && byId.get(e.recipeId);
-      if (!r) continue;
-      const v = r.versions.find((x) => x.id === e.versionId) || r.versions[0];
-      const key = `${r.id}|${v.id}|${r.updatedAt}`;
-      if (!nutriCache.has(key)) nutriCache.set(key, Nutrition.perServing(r, v, byId));
-      const n = nutriCache.get(key);
-      if (n.counted) { kcal += n.kcal; p += n.p; any = true; }
+          ${dayNote ? `<button class="daynote" data-act="daynote"><span class="fixed-label">Nota del ${Dates.weekday(d).toLowerCase()}</span><span class="mcell-hand">${esc(dayNote)}</span></button>` : ''}
+
+          <div class="menu-actions">
+            ${dayNote ? '' : `<button class="btn add-row" data-act="daynote">${icon('notes', 'ic-sm')}Nota del día</button>`}
+            <button class="btn add-row" data-act="new-fixed">${icon('repeat', 'ic-sm')}Nota fija</button>
+            <button class="btn add-row" data-act="day-shop">${icon('shopping-cart', 'ic-sm')}A la compra</button>
+          </div>
+          ${hidden.length ? `<button class="hidden-link" data-act="hidden">${hidden.length === 1 ? '1 nota fija oculta' : `${hidden.length} notas fijas ocultas`}: mostrar</button>` : ''}
+        </section>`;
     }
-    return any ? `<p class="day-kcal">${icon('flame', 'ic-sm')}≈ ${nf.format(Math.round(kcal))} kcal · ${Math.round(p)} g proteína <span>por persona</span></p>` : '';
+
+    app.innerHTML = `<div class="page has-tabbar"><div class="menu2">${head}${body}</div></div>${tabbarHTML('menu')}`;
+    scrollTo(0, y);
   }
 
-  async function editSlot(key) {
+  /* --- Editar un hueco (persona + comida/cena) --- */
+  async function editCell(k, s, p, init) {
     const plan = Docs.live(await Docs.get('plan'));
-    const e = plan[key];
-    if (!e || !byId.has(e.recipeId)) {
-      const r = await pickRecipe('¿Qué cocinas?');
-      if (!r) return;
-      await Docs.put('plan', key, { recipeId: r.id, versionId: r.versions[0].id, servings: r.versions[0].servings || 2 });
-      return;
-    }
-    const r = byId.get(e.recipeId);
-    let servings = e.servings;
-    let versionId = e.versionId;
-    const [day, slot] = key.split('|');
-    const when = `${SLOTS.find(([k]) => k === slot)[1]} del ${Dates.weekday(new Date(day + 'T12:00')).toLowerCase()}`;
-    const choice = await Sheets.open((el, close) => {
-      const paintSheet = () => {
-        el.innerHTML = `<p class="hint" style="margin:0 0 4px">${esc(when)}</p><h2 class="serif">${esc(r.name)}</h2>
-          ${r.versions.length > 1 ? `<div class="chips" style="margin:10px 0 4px">${r.versions.map((v) => `<button class="chip ${v.id === versionId ? 'is-on' : ''}" data-v="${v.id}">${esc(v.name)}</button>`).join('')}</div>` : ''}
-          <div class="block-head" style="margin:16px 0"><span class="label">Raciones</span>
-            <div class="stepper"><button class="icon-btn" data-s="-1" aria-label="Menos raciones">${icon('minus', 'ic-sm')}</button>
-            <output>${servings} ${servings === 1 ? 'ración' : 'raciones'}</output>
-            <button class="icon-btn" data-s="1" aria-label="Más raciones">${icon('plus', 'ic-sm')}</button></div></div>
+    const cur = MenuPlan.cell(plan, k, s, p);
+    const other = p === 'juanjo' ? 'maria' : 'juanjo';
+    const st = init || {
+      mode: cur && cur.same ? 'same' : cur && cur.text != null ? 'text' : 'recipe',
+      text: cur && cur.text != null ? cur.text : '',
+      recipeId: cur?.recipeId || null, versionId: cur?.versionId || null, both: false, week: false,
+    };
+    const d = new Date(k + 'T12:00');
+    const slotName = SLOTS.find(([x]) => x === s)[1];
+    const res = await Sheets.open((el, close) => {
+      const render = () => {
+        const r = st.recipeId && byId.get(st.recipeId);
+        const modes = [['recipe', 'De mis recetas'], ['text', 'Escribir a mano'], ...(p === 'maria' ? [['same', 'Igual que Juanjo']] : [])];
+        el.innerHTML = `<p class="hint" style="margin:0 0 2px">${Dates.weekday(d)} ${d.getDate()} · ${slotName}</p>
+          <h2 class="serif">${personName(p)}</h2>
+          <div class="segmented ${modes.length === 3 ? 'three' : ''}" style="margin-top:12px">${modes.map(([m, l]) => `<button data-m="${m}" aria-selected="${st.mode === m}">${l}</button>`).join('')}</div>
+          ${st.mode === 'recipe' ? (r
+            ? `<div class="pick-row is-static">${thumbHTML(r.coverImageId)}<span><span class="pick-name serif">${esc(r.name)}</span><span class="pick-meta">${esc(r.category || '')}</span></span>
+                 <button class="btn" data-c="pick" style="margin-left:auto">Cambiar</button></div>
+               ${r.versions.length > 1 ? `<div class="chips" style="margin:6px 0 4px">${r.versions.map((v) => `<button class="chip ${v.id === st.versionId ? 'is-on' : ''}" data-v="${v.id}">${esc(v.name)}</button>`).join('')}</div>` : ''}`
+            : `<button class="btn btn-block" data-c="pick">${icon('book-open', 'ic-sm')}Elegir receta</button>`) : ''}
+          ${st.mode === 'text' ? `<input class="input" id="cell-text" value="${esc(st.text)}" placeholder="Lentejas de su madre" maxlength="80" autocomplete="off">
+            <p class="hint" style="margin-top:6px">Aunque no esté en el recetario.</p>` : ''}
+          ${st.mode === 'same' ? `<p class="hint">Saldrá lo que tenga Juanjo ese día, y si lo cambias se cambia para los dos.</p>` : ''}
+          ${st.mode !== 'same' ? `<label class="switch"><input type="checkbox" data-t="both" ${st.both ? 'checked' : ''}>Poner también a ${personName(other)}</label>` : ''}
+          <label class="switch"><input type="checkbox" data-t="week" ${st.week ? 'checked' : ''}>Repetir toda la semana</label>
           <div class="actions" style="justify-content:space-between">
-            <button class="btn btn-danger" data-c="remove">Quitar</button>
-            <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-c="change">Cambiar</button><button class="btn" data-c="open">Ver receta</button><button class="btn btn-primary" data-c="save">Hecho</button></div>
+            ${cur ? `<button class="btn btn-danger" data-c="remove">Quitar</button>` : '<span></span>'}
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              ${st.mode === 'recipe' && r ? `<button class="btn" data-c="open">Ver receta</button>` : ''}
+              <button class="btn btn-primary" data-c="save">Guardar</button></div>
           </div>`;
+        const t = $('#cell-text', el);
+        if (t) { t.addEventListener('input', () => { st.text = t.value; }); t.addEventListener('keydown', (e) => { if (e.key === 'Enter') close('save'); }); }
       };
-      paintSheet();
-      el.addEventListener('click', (ev) => {
-        const v = ev.target.closest('[data-v]'); if (v) { versionId = v.dataset.v; paintSheet(); return; }
-        const st = ev.target.closest('[data-s]'); if (st) { servings = Math.max(1, Math.min(99, servings + +st.dataset.s)); paintSheet(); return; }
-        const c = ev.target.closest('[data-c]'); if (c) close(c.dataset.c);
+      render();
+      if (st.mode === 'text') setTimeout(() => $('#cell-text', el)?.focus(), 60);
+      el.addEventListener('change', (e) => { const t = e.target.closest('[data-t]'); if (t) st[t.dataset.t] = t.checked; });
+      el.addEventListener('click', (e) => {
+        const m = e.target.closest('[data-m]'); if (m) { st.mode = m.dataset.m; render(); if (st.mode === 'text') $('#cell-text', el)?.focus(); return; }
+        const v = e.target.closest('[data-v]'); if (v) { st.versionId = v.dataset.v; render(); return; }
+        const c = e.target.closest('[data-c]'); if (c) close(c.dataset.c);
       });
-    }, { label: r.name });
+    }, { label: `${personName(p)}, ${slotName}` });
 
-    if (choice === 'remove') { await Docs.remove('plan', key); return; }
-    if (choice === 'change') {
-      const nr = await pickRecipe('¿Qué cocinas?');
-      if (nr) await Docs.put('plan', key, { recipeId: nr.id, versionId: nr.versions[0].id, servings });
-      return;
+    if (!res) return;
+    if (res === 'pick') {
+      const r = await pickRecipe(`¿Qué come ${personName(p)}?`);
+      if (r) { st.recipeId = r.id; st.versionId = r.versions[0].id; }
+      return editCell(k, s, p, st);
     }
-    if (servings !== e.servings || versionId !== e.versionId) await Docs.put('plan', key, { ...e, servings, versionId });
-    if (choice === 'open') Router.go(`#/receta/${r.id}?v=${versionId}`);
+    if (res === 'open') { Router.go(`#/receta/${st.recipeId}?v=${st.versionId}`); return; }
+
+    let value = null;
+    if (res === 'save') {
+      if (st.mode === 'same') value = { same: true };
+      else if (st.mode === 'text') value = st.text.trim() ? { text: st.text.trim() } : null;
+      else value = st.recipeId ? { recipeId: st.recipeId, versionId: st.versionId, servings: 1 } : null;
+      if (!value && !cur) { toast(st.mode === 'text' ? 'Escribe qué comida es' : 'Elige una receta'); return editCell(k, s, p, st); }
+    }
+    const dayKeys = st.week ? weekDays().map(Dates.key) : [k];
+    const people = st.both && st.mode !== 'same' ? [p, other] : [p];
+    const ops = [];
+    for (const dk of dayKeys) {
+      ops.push(...MenuPlan.upgradeOps(plan, dk, s));
+      for (const pp of people) ops.push(value ? ['put', `${dk}|${s}|${pp}`, value] : ['remove', `${dk}|${s}|${pp}`]);
+    }
+    await MenuPlan.apply('plan', ops);
+    if (st.week) toast(value ? 'Puesto toda la semana' : 'Quitado de toda la semana');
   }
 
-  async function weekToShopping() {
-    const plan = Docs.live(await Docs.get('plan'));
-    const monday = Dates.monday(UI.menuWeek);
-    const sum = new Map();
-    for (let i = 0; i < 7; i++) {
-      const k = Dates.key(Dates.addDays(monday, i));
-      for (const [s] of SLOTS) {
-        const e = plan[`${k}|${s}`];
-        if (!e || !byId.has(e.recipeId)) continue;
-        const id = `${e.recipeId}|${e.versionId}`;
-        sum.set(id, { ...e, servings: (sum.get(id)?.servings || 0) + e.servings });
-      }
+  /* --- Notas fijas --- */
+  async function fixedSheet(id) {
+    const extras = Docs.live(await Docs.get('menuExtras'));
+    const n = id ? extras[id] : null;
+    const st = { label: n?.label || NOTE_LABELS[0], custom: n && !NOTE_LABELS.includes(n.label) ? n.label : '', who: n?.who || 'maria', text: n?.text || '' };
+    if (st.custom) st.label = '__other';
+    const res = await Sheets.open((el, close) => {
+      const render = () => {
+        el.innerHTML = `<h2 class="serif">${n ? 'Nota fija' : 'Nueva nota fija'}</h2>
+          <p>Sale todos los días del menú, sin tener que escribirla cada vez.</p>
+          <span class="label">Qué es</span>
+          <div class="chips wrap" style="margin:8px 0 12px">${[...NOTE_LABELS, '__other'].map((l) => `<button class="chip ${st.label === l ? 'is-on' : ''}" data-l="${esc(l)}">${l === '__other' ? 'Otra' : esc(l)}</button>`).join('')}</div>
+          ${st.label === '__other' ? `<input class="input" id="fx-custom" value="${esc(st.custom)}" placeholder="Pre-entreno, recena…" maxlength="30" style="margin-bottom:12px">` : ''}
+          <span class="label">Para quién</span>
+          <div class="chips wrap" style="margin:8px 0 12px">${WHO.map(([w, l]) => `<button class="chip ${st.who === w ? 'is-on' : ''}" data-w="${w}">${l}</button>`).join('')}</div>
+          <label class="field"><span class="label">Qué toma</span>
+            <input class="input" id="fx-text" value="${esc(st.text)}" placeholder="Tostada integral con tomate y café" maxlength="120"></label>
+          <div class="actions" style="justify-content:space-between">
+            ${n ? `<div style="display:flex;gap:8px"><button class="btn btn-danger" data-c="delete">Borrar</button><button class="btn" data-c="hide">${icon('eye', 'ic-sm')}Ocultar</button></div>` : '<span></span>'}
+            <button class="btn btn-primary" data-c="save">Guardar</button></div>`;
+        $('#fx-text', el).addEventListener('input', (e) => { st.text = e.target.value; });
+        $('#fx-custom', el)?.addEventListener('input', (e) => { st.custom = e.target.value; });
+      };
+      render();
+      el.addEventListener('click', (e) => {
+        const l = e.target.closest('[data-l]'); if (l) { st.label = l.dataset.l; render(); if (st.label === '__other') $('#fx-custom', el)?.focus(); return; }
+        const w = e.target.closest('[data-w]'); if (w) { st.who = w.dataset.w; render(); return; }
+        const c = e.target.closest('[data-c]'); if (c) close(c.dataset.c);
+      });
+    }, { label: 'Nota fija' });
+    if (!res) return;
+    if (res === 'delete') {
+      if (await confirmSheet({ title: '¿Borrar esta nota fija?', text: 'Dejará de salir todos los días. Si solo quieres quitarla un tiempo, mejor ocúltala.', ok: 'Borrar', danger: true })) await Docs.remove('menuExtras', id);
+      return;
     }
-    const ok = await confirmSheet({ title: 'Añadir la semana a la compra', text: `Se añaden los ingredientes de ${sum.size} ${sum.size === 1 ? 'receta' : 'recetas'}, sumando las raciones de toda la semana.`, ok: 'Añadir' });
+    if (res === 'hide') { await Docs.put('menuExtras', id, { ...n, hidden: true }); toast('Nota oculta. Puedes volver a mostrarla desde el menú.'); return; }
+    const label = st.label === '__other' ? st.custom.trim() : st.label;
+    if (!label) { toast('Ponle nombre a la nota'); return fixedSheet(id); }
+    await Docs.put('menuExtras', id || uid(), { label: label.charAt(0).toUpperCase() + label.slice(1), who: st.who, text: st.text.trim(), hidden: false });
+  }
+
+  /** Tocar una nota fija en un día: cambiarla solo ese día o para todos los días. */
+  async function fixedOnDay(id, k) {
+    const [plan, extras] = await Promise.all([Docs.get('plan').then(Docs.live), Docs.get('menuExtras').then(Docs.live)]);
+    const n = extras[id];
+    if (!n) return;
+    const over = plan[`${k}|fix:${id}`];
+    const d = new Date(k + 'T12:00');
+    let scope = over ? 'day' : 'all';
+    let text = over ? over.text : n.text;
+    const res = await Sheets.open((el, close) => {
+      const render = () => {
+        el.innerHTML = `<p class="hint" style="margin:0 0 2px">${esc(whoName(n.who))} · fijo cada día</p><h2 class="serif">${esc(n.label)}</h2>
+          <div class="segmented" style="margin-top:12px">
+            <button data-sc="all" aria-selected="${scope === 'all'}">Todos los días</button>
+            <button data-sc="day" aria-selected="${scope === 'day'}">Solo el ${Dates.weekday(d).toLowerCase()} ${d.getDate()}</button></div>
+          <input class="input" id="fx-day" value="${esc(text)}" maxlength="120" placeholder="${esc(n.text)}">
+          ${over ? `<p class="hint" style="margin-top:6px">Ese día tiene un cambio. «Todos los días» lo quita y vuelve a lo de siempre.</p>` : ''}
+          <div class="actions" style="justify-content:space-between">
+            <button class="btn" data-c="more">${icon('ellipsis-vertical', 'ic-sm')}Más</button>
+            <button class="btn btn-primary" data-c="save">Guardar</button></div>`;
+        $('#fx-day', el).addEventListener('input', (e) => { text = e.target.value; });
+      };
+      render();
+      el.addEventListener('click', (e) => {
+        const sc = e.target.closest('[data-sc]'); if (sc) { scope = sc.dataset.sc; if (scope === 'all' && over) text = n.text; render(); return; }
+        const c = e.target.closest('[data-c]'); if (c) close(c.dataset.c);
+      });
+    }, { label: n.label });
+    if (res === 'more') return fixedSheet(id);
+    if (res !== 'save') return;
+    if (scope === 'day') { await Docs.put('plan', `${k}|fix:${id}`, { text: text.trim() }); return; }
+    const ops = over ? [['remove', `${k}|fix:${id}`]] : [];
+    await MenuPlan.apply('plan', ops);
+    await Docs.put('menuExtras', id, { ...n, text: text.trim() });
+  }
+
+  async function hiddenSheet() {
+    const extras = Docs.live(await Docs.get('menuExtras'));
+    const list = Object.entries(extras).filter(([, n]) => n.hidden).map(([id, n]) => ({ id, ...n })).sort(fixedOrder);
+    const id = await Sheets.open((el, close) => {
+      el.innerHTML = `<h2 class="serif">Notas fijas ocultas</h2><p>Vuelven a salir todos los días al mostrarlas.</p>
+        <div class="menu">${list.map((n) => `<button data-show="${n.id}">${icon('eye', 'ic-sm')}<span>${esc(n.label)} · ${esc(whoName(n.who))}<br><span class="hint">${esc(n.text)}</span></span></button>`).join('')}</div>`;
+      el.addEventListener('click', (e) => { const b = e.target.closest('[data-show]'); if (b) close(b.dataset.show); });
+    }, { label: 'Notas ocultas' });
+    if (id) await Docs.put('menuExtras', id, { ...extras[id], hidden: false });
+  }
+
+  async function dayNoteSheet(k) {
+    const plan = Docs.live(await Docs.get('plan'));
+    const cur = plan[`${k}|daynote`]?.text || '';
+    const d = new Date(k + 'T12:00');
+    const text = await Sheets.open((el, close) => {
+      el.innerHTML = `<h2 class="serif">Nota del ${Dates.weekday(d).toLowerCase()} ${d.getDate()}</h2>
+        <textarea class="textarea" id="dn" rows="3" placeholder="Sacar el salmón del congelador por la mañana" maxlength="300">${esc(cur)}</textarea>
+        <div class="actions" style="justify-content:space-between">
+          ${cur ? `<button class="btn btn-danger" data-c="del">Quitar</button>` : '<span></span>'}
+          <button class="btn btn-primary" data-c="save">Guardar</button></div>`;
+      setTimeout(() => $('#dn', el)?.focus(), 60);
+      el.addEventListener('click', (e) => { const c = e.target.closest('[data-c]'); if (c) close(c.dataset.c === 'del' ? '' : $('#dn', el).value); });
+    }, { label: 'Nota del día' });
+    if (text == null) return;
+    if (text.trim()) await Docs.put('plan', `${k}|daynote`, { text: text.trim() });
+    else if (cur) await Docs.remove('plan', `${k}|daynote`);
+  }
+
+  /* --- A la compra: solo cuentan las recetas (lo escrito a mano no tiene ingredientes) --- */
+  async function toShopping(dayKeys, title) {
+    const plan = Docs.live(await Docs.get('plan'));
+    const sum = new Map();
+    let hand = 0;
+    for (const k of dayKeys) for (const [s] of SLOTS) for (const [p] of PEOPLE) {
+      const c = MenuPlan.resolve(plan, k, s, p);
+      if (!c) continue;
+      if (c.text != null) { hand++; continue; }
+      if (!byId.has(c.recipeId)) continue;
+      const id = `${c.recipeId}|${c.versionId}`;
+      sum.set(id, { recipeId: c.recipeId, versionId: c.versionId, servings: (sum.get(id)?.servings || 0) + (c.servings || 1) });
+    }
+    if (!sum.size) { toast(hand ? 'Lo apuntado es a mano: no tiene ingredientes que sumar' : 'No hay recetas apuntadas'); return; }
+    const raciones = [...sum.values()].reduce((a, b) => a + b.servings, 0);
+    const ok = await confirmSheet({
+      title,
+      text: `Se suman los ingredientes de ${sum.size} ${sum.size === 1 ? 'receta' : 'recetas'} (${raciones} ${raciones === 1 ? 'ración' : 'raciones'} entre los dos).${hand ? ` ${hand === 1 ? 'Un plato escrito a mano no se incluye' : `${hand} platos escritos a mano no se incluyen`}: añádelos a mano en la compra si hace falta.` : ''}`,
+      ok: 'Añadir',
+    });
     if (!ok) return;
     for (const e of sum.values()) await addToShopping(e.recipeId, e.versionId, e.servings, { silent: true });
-    toast('Semana añadida a la lista', { label: 'Ver lista', run: () => Router.go('#/compra') });
+    toast('Añadido a la compra', { label: 'Ver lista', run: () => Router.go('#/compra') });
   }
 
   const onClick = async (e) => {
-    const slot = e.target.closest('[data-slot]');
-    if (slot) { editSlot(slot.dataset.slot); return; }
+    const cell = e.target.closest('[data-cell]');
+    if (cell) { const [k, s, p] = cell.dataset.cell.split('|'); editCell(k, s, p); return; }
+    const dy = e.target.closest('[data-day]');
+    if (dy) { UI.menuDay = dy.dataset.day; paint(); return; }
+    const gd = e.target.closest('[data-goday]');
+    if (gd) { UI.menuDay = gd.dataset.goday; UI.menuMode = 'day'; await paint(); scrollTo(0, 0); return; }
+    const md = e.target.closest('[data-mode]');
+    if (md) { UI.menuMode = md.dataset.mode; paint(); return; }
+    const fx = e.target.closest('[data-fixed]');
+    if (fx) { fixedOnDay(fx.dataset.fixed, UI.menuDay); return; }
     const a = e.target.closest('[data-act]');
     if (!a) return;
-    if (a.dataset.act === 'prev') { UI.menuWeek--; firstPaint = true; paint(); }
-    if (a.dataset.act === 'next') { UI.menuWeek++; firstPaint = true; paint(); }
-    if (a.dataset.act === 'today') { UI.menuWeek = 0; firstPaint = true; paint(); }
-    if (a.dataset.act === 'to-shop') weekToShopping();
+    switch (a.dataset.act) {
+      case 'prev': UI.menuWeek--; UI.menuDay = null; paint(); break;
+      case 'next': UI.menuWeek++; UI.menuDay = null; paint(); break;
+      case 'today': UI.menuWeek = 0; UI.menuDay = null; paint(); break;
+      case 'daynote': dayNoteSheet(UI.menuDay); break;
+      case 'new-fixed': fixedSheet(null); break;
+      case 'hidden': hiddenSheet(); break;
+      case 'day-shop': { const d = new Date(UI.menuDay + 'T12:00'); toShopping([UI.menuDay], `Añadir el ${Dates.weekday(d).toLowerCase()} a la compra`); break; }
+      case 'week-shop': toShopping(weekDays().map(Dates.key), 'Añadir la semana a la compra'); break;
+    }
   };
+
   await paint();
+  scrollTo(0, 0);
   app.addEventListener('click', onClick);
-  const off = Docs.on((name) => { if (name === 'plan' || name === '*') paint(); });
+  const off = Docs.on((name) => { if (name === 'plan' || name === 'menuExtras' || name === '*') paint(); });
   return { keepScroll: true, destroy: () => { app.removeEventListener('click', onClick); off(); } };
 }
 
